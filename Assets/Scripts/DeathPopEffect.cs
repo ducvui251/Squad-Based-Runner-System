@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class DeathPopEffect : MonoBehaviour
@@ -11,30 +12,63 @@ public class DeathPopEffect : MonoBehaviour
     private Shard[] shards;
     private float timer = 0f;
     private const float DURATION = 0.5f;
-    private Material tempMaterial;
+    
+    // Static reusable pool & material caching to completely eliminate runtime GC allocations and file checks
+    private static Queue<DeathPopEffect> pool = new Queue<DeathPopEffect>();
+    private static Material sharedMaterial;
+    private static MaterialPropertyBlock propBlock;
 
     public static void Create(Vector3 position, Color color)
     {
-        GameObject g = new GameObject("DeathPopEffect");
-        g.transform.position = position;
-        DeathPopEffect effect = g.AddComponent<DeathPopEffect>();
-        effect.Initialize(color);
+        DeathPopEffect effect = null;
+        while (pool.Count > 0)
+        {
+            effect = pool.Dequeue();
+            if (effect != null)
+            {
+                effect.gameObject.SetActive(true);
+                effect.transform.position = position;
+                break;
+            }
+        }
+
+        if (effect == null)
+        {
+            GameObject g = new GameObject("DeathPopEffect");
+            effect = g.AddComponent<DeathPopEffect>();
+            effect.Initialize();
+        }
+
+        effect.Activate(position, color);
     }
 
-    private void Initialize(Color color)
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticState()
+    {
+        pool.Clear();
+        sharedMaterial = null;
+        propBlock = null;
+    }
+
+    private void Initialize()
     {
         int count = 6;
         shards = new Shard[count];
 
-        // Find URP/Unlit shader, fallback to standard Unlit/Color if not found
-        Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-        if (shader == null)
+        if (sharedMaterial == null)
         {
-            shader = Shader.Find("Unlit/Color");
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null)
+            {
+                shader = Shader.Find("Unlit/Color");
+            }
+            sharedMaterial = new Material(shader);
         }
 
-        tempMaterial = new Material(shader);
-        tempMaterial.color = color;
+        if (propBlock == null)
+        {
+            propBlock = new MaterialPropertyBlock();
+        }
 
         for (int i = 0; i < count; i++)
         {
@@ -54,18 +88,41 @@ public class DeathPopEffect : MonoBehaviour
             Renderer r = shardObj.GetComponent<Renderer>();
             if (r != null)
             {
-                r.sharedMaterial = tempMaterial;
+                r.sharedMaterial = sharedMaterial;
             }
 
             shards[i] = new Shard
             {
                 transform = shardObj.transform,
-                velocity = new Vector3(
-                    Random.Range(-3f, 3f),
-                    Random.Range(3f, 8f),
-                    Random.Range(-3f, 3f)
-                )
+                velocity = Vector3.zero
             };
+        }
+    }
+
+    private void Activate(Vector3 position, Color color)
+    {
+        timer = 0f;
+        transform.position = position;
+
+        // Set color via MaterialPropertyBlock to avoid cloning Material instances
+        propBlock.SetColor("_Color", color);
+        propBlock.SetColor("_BaseColor", color);
+
+        for (int i = 0; i < shards.Length; i++)
+        {
+            shards[i].transform.localPosition = Vector3.zero;
+            shards[i].transform.localScale = Vector3.one * Random.Range(0.15f, 0.3f);
+            shards[i].velocity = new Vector3(
+                Random.Range(-3f, 3f),
+                Random.Range(3f, 8f),
+                Random.Range(-3f, 3f)
+            );
+
+            Renderer r = shards[i].transform.GetComponent<Renderer>();
+            if (r != null)
+            {
+                r.SetPropertyBlock(propBlock);
+            }
         }
     }
 
@@ -76,11 +133,8 @@ public class DeathPopEffect : MonoBehaviour
 
         if (progress >= 1f)
         {
-            if (tempMaterial != null)
-            {
-                Destroy(tempMaterial); // Prevent material leaks
-            }
-            Destroy(gameObject);
+            gameObject.SetActive(false);
+            pool.Enqueue(this);
             return;
         }
 

@@ -42,22 +42,20 @@ public class CircularSaw : MonoBehaviour
 
     private void CheckRunnerCollisionsDistance()
     {
+        if (!UIManager.IsGameActive) return;
+
         if (cachedCrowdManager == null)
         {
             cachedCrowdManager = FindFirstObjectByType<PlayerCrowdManager>();
             if (cachedCrowdManager == null) return;
         }
 
-        // Duyệt qua tất cả lính (là các GameObject con của PlayerCrowdManager)
-        for (int i = cachedCrowdManager.transform.childCount - 1; i >= 0; i--)
+        // Duyệt qua danh sách lính đang hoạt động O(1) thay vì duyệt qua children
+        var runners = cachedCrowdManager.ActiveRunners;
+        for (int i = runners.Count - 1; i >= 0; i--)
         {
-            Transform child = cachedCrowdManager.transform.GetChild(i);
-
-            // Bỏ qua nếu đối tượng không hoạt động hoặc là camera
-            if (!child.gameObject.activeSelf || child.name.Contains("Camera")) continue;
-
-            // Kiểm tra xem đối tượng có chứa Mesh Renderer (đại diện cho mô hình lính) hay không
-            if (child.GetComponentInChildren<SkinnedMeshRenderer>() == null) continue;
+            if (i >= runners.Count || runners[i] == null) continue;
+            Transform child = runners[i].transform;
 
             // Tính toán khoảng cách giữa lính xanh và lưỡi cưa
             float distance = Vector3.Distance(child.position, transform.position);

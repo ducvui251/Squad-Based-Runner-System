@@ -3,7 +3,7 @@ using UnityEngine;
 public class Enemy : MonoBehaviour
 {
     private enum EnemyState { Idle, Running, Dead }
-    private EnemyState state = EnemyState.Idle;
+    private EnemyState state = (EnemyState)(-1); // Initialize to force first transition
 
     [Header("Detection Settings")]
     [SerializeField] private float detectionDistance = 5f;
@@ -17,6 +17,8 @@ public class Enemy : MonoBehaviour
     private PlayerCrowdManager playerCrowd;
     private int lastPlaybackStateHash = 0; // Tracks the animation hash currently playing
     private bool isAlerted = false;
+    private int runParamHash = 0;
+    private bool hasRunParam = false;
 
     private void Start()
     {
@@ -24,9 +26,13 @@ public class Enemy : MonoBehaviour
         playerCrowd = FindFirstObjectByType<PlayerCrowdManager>();
 
         // Set animator controller if cached from player
-        if (animator != null && playerCrowd != null && animator.runtimeAnimatorController == null)
+        if (animator != null)
         {
-            animator.runtimeAnimatorController = playerCrowd.CachedAnimatorController;
+            if (playerCrowd != null && animator.runtimeAnimatorController == null)
+            {
+                animator.runtimeAnimatorController = playerCrowd.CachedAnimatorController;
+            }
+            CacheAnimatorParams();
         }
 
         // Configure Rigidbody if present to prevent physics issues
@@ -36,13 +42,33 @@ public class Enemy : MonoBehaviour
             rb.isKinematic = true; // Set kinematic to prevent sliding or gravity bugs
         }
 
-        // Bắt đầu ở trạng thái Idle và tắt Animator để không chạy bất kỳ animation nào
+        // Bắt đầu ở trạng thái Idle
         PlayIdleAnimation();
+    }
+
+    private void CacheAnimatorParams()
+    {
+        if (animator == null || animator.runtimeAnimatorController == null) return;
+        foreach (var param in animator.parameters)
+        {
+            if (param.type == AnimatorControllerParameterType.Bool)
+            {
+                if (param.name == "IsRunning" || param.name == "isRunning" || param.name == "Run" || param.name == "run")
+                {
+                    runParamHash = param.nameHash;
+                    hasRunParam = true;
+                    break;
+                }
+            }
+        }
     }
 
     private void Update()
     {
         if (state == EnemyState.Dead) return;
+
+        // Bỏ qua update nếu game chưa bắt đầu
+        if (!UIManager.IsGameActive) return;
 
         if (playerCrowd == null)
         {
@@ -54,6 +80,7 @@ public class Enemy : MonoBehaviour
         if (animator != null && animator.runtimeAnimatorController == null && playerCrowd.CachedAnimatorController != null)
         {
             animator.runtimeAnimatorController = playerCrowd.CachedAnimatorController;
+            CacheAnimatorParams();
             PlayIdleAnimation();
         }
 
@@ -142,7 +169,10 @@ public class Enemy : MonoBehaviour
 
     private void PlayIdleAnimation()
     {
-        if (animator == null) return;
+        if (animator == null || animator.runtimeAnimatorController == null) return;
+
+        if (state == EnemyState.Idle) return;
+        state = EnemyState.Idle;
 
         // Đảm bảo Animator hoạt động để giữ tư thế Idle tự nhiên thay vì T-pose
         animator.enabled = true;
@@ -160,22 +190,18 @@ public class Enemy : MonoBehaviour
             animator.Play("Idle");
         }
 
-        // Đặt lại các tham số bool trong Animator Controller nếu có
-        foreach (var param in animator.parameters)
+        if (hasRunParam)
         {
-            if (param.type == AnimatorControllerParameterType.Bool)
-            {
-                if (param.name == "IsRunning" || param.name == "isRunning" || param.name == "Run" || param.name == "run")
-                {
-                    animator.SetBool(param.name, false);
-                }
-            }
+            animator.SetBool(runParamHash, false);
         }
     }
 
     private void PlayRunAnimation()
     {
-        if (animator == null) return;
+        if (animator == null || animator.runtimeAnimatorController == null) return;
+
+        if (state == EnemyState.Running) return;
+        state = EnemyState.Running;
 
         // Bật lại Animator và đặt tốc độ bình thường (1) để enemy chạy
         animator.enabled = true;
@@ -194,16 +220,9 @@ public class Enemy : MonoBehaviour
             animator.Play(runHash);
         }
 
-        // Đồng thời thiết lập các tham số bool trong Animator Controller nếu có
-        foreach (var param in animator.parameters)
+        if (hasRunParam)
         {
-            if (param.type == AnimatorControllerParameterType.Bool)
-            {
-                if (param.name == "IsRunning" || param.name == "isRunning" || param.name == "Run" || param.name == "run")
-                {
-                    animator.SetBool(param.name, true);
-                }
-            }
+            animator.SetBool(runParamHash, true);
         }
     }
 

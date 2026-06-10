@@ -35,18 +35,20 @@ public class PlayerCrowdManager : MonoBehaviour
     private bool hasTriggeredGameOver = false;
     private float gameActiveTimer = 0f;                        // Time elapsed since game became active
     private const float GAME_OVER_GRACE_PERIOD = 1.5f;        // Seconds after game starts before game over can trigger
-    private float initialPlayerY = 0f;                         // Player's Y position at start, used for fall detection
+    private float lastGroundedY = 0f;                          // Tracks the last Y coordinate where the player was grounded
 
     public bool IsFighting => isFighting;
     public float EnemyTargetX => enemyTargetX;
     public bool IsGameOver => hasTriggeredGameOver;
+    public List<GameObject> ActiveRunners => activeRunners;
+    public int ActiveRunnerCount => activeRunners.Count;
 
     private void Start()
     {
         hasTriggeredGameOver = false;
         gameActiveTimer = 0f;
         playerCc = GetComponent<CharacterController>();
-        initialPlayerY = transform.position.y;
+        lastGroundedY = transform.position.y;
         InitializePool();
         InitializeLeadPlayer();
         DetectTrackWidth();
@@ -101,31 +103,39 @@ public class PlayerCrowdManager : MonoBehaviour
         }
     }
 
+    private GameObject CreateNewPoolObject()
+    {
+        GameObject obj = Instantiate(runnerPrefab, transform);
+        
+        // Clean up any components causing physics conflicts on root/children immediately
+        foreach (var rb in obj.GetComponentsInChildren<Rigidbody>())
+        {
+            rb.isKinematic = true;
+            Destroy(rb);
+        }
+        foreach (var col in obj.GetComponentsInChildren<Collider>())
+        {
+            col.enabled = false;
+            Destroy(col);
+        }
+        foreach (var cc in obj.GetComponentsInChildren<CharacterController>())
+        {
+            cc.enabled = false;
+            Destroy(cc);
+        }
+
+        obj.SetActive(false);
+        runnerPool.Add(obj);
+        return obj;
+    }
+
     private void InitializePool()
     {
-        for (int i = 0; i < poolSize; i++)
+        // Pre-warm a small number of clones to avoid startup lag
+        int initialWarmup = Mathf.Min(20, poolSize);
+        for (int i = 0; i < initialWarmup; i++)
         {
-            GameObject obj = Instantiate(runnerPrefab, transform);
-            
-            // Clean up any components causing physics conflicts on root/children immediately
-            foreach (var rb in obj.GetComponentsInChildren<Rigidbody>())
-            {
-                rb.isKinematic = true;
-                Destroy(rb);
-            }
-            foreach (var col in obj.GetComponentsInChildren<Collider>())
-            {
-                col.enabled = false;
-                Destroy(col);
-            }
-            foreach (var cc in obj.GetComponentsInChildren<CharacterController>())
-            {
-                cc.enabled = false;
-                Destroy(cc);
-            }
-
-            obj.SetActive(false);
-            runnerPool.Add(obj);
+            CreateNewPoolObject();
         }
     }
 
@@ -180,11 +190,17 @@ public class PlayerCrowdManager : MonoBehaviour
             gameActiveTimer = 0f;
         }
 
+        // Update last grounded Y when player is grounded to support sloped tracks
+        if (playerCc != null && playerCc.isGrounded)
+        {
+            lastGroundedY = transform.position.y;
+        }
+
         // --- Game Over checks (only after grace period to avoid false triggers at startup) ---
         if (UIManager.IsGameActive && !hasTriggeredGameOver && gameActiveTimer > GAME_OVER_GRACE_PERIOD)
         {
-            // Check 1: Player fell off the track (Y coordinate dropped by more than 10 meters)
-            if (transform.position.y < initialPlayerY - 10f)
+            // Check 1: Player fell off the track (Y coordinate dropped by more than 10 meters below last grounded height)
+            if (transform.position.y < lastGroundedY - 10f)
             {
                 hasTriggeredGameOver = true;
                 if (UIManager.Instance != null)
@@ -422,49 +438,63 @@ public class PlayerCrowdManager : MonoBehaviour
 
         int amountToSpawn = Mathf.Min(amount, maxVisualClones - currentCount);
         int spawned = 0;
+
+        // 1. First, try to find existing inactive objects in the pool
         for (int i = 0; i < runnerPool.Count; i++)
         {
             if (spawned >= amountToSpawn) break;
 
             if (!runnerPool[i].activeSelf)
             {
-                GameObject newRunner = runnerPool[i];
-                newRunner.transform.SetParent(transform); // Ensure it is reparented to the crowd manager
-                newRunner.transform.position = transform.position;
-                newRunner.transform.localRotation = Quaternion.identity;
-                newRunner.SetActive(true);
-
-                Animator anim = newRunner.GetComponentInChildren<Animator>();
-                if (anim != null && cachedAnimatorController != null)
-                {
-                    anim.runtimeAnimatorController = cachedAnimatorController;
-                    if (activeRunners.Count > 0 && activeRunners[0] != null)
-                    {
-                        Animator leadAnim = activeRunners[0].GetComponentInChildren<Animator>();
-                        if (leadAnim != null)
-                        {
-                            AnimatorStateInfo stateInfo = leadAnim.GetCurrentAnimatorStateInfo(0);
-                            anim.Play(stateInfo.fullPathHash, 0, stateInfo.normalizedTime);
-                        }
-                    }
-                }
-
-                if (activeRunners.Count > 0 && activeRunners[0] != null)
-                {
-                    SkinnedMeshRenderer leadRenderer = activeRunners[0].GetComponentInChildren<SkinnedMeshRenderer>();
-                    SkinnedMeshRenderer newRenderer = newRunner.GetComponentInChildren<SkinnedMeshRenderer>();
-                    if (leadRenderer != null && newRenderer != null)
-                    {
-                        newRenderer.sharedMaterial = leadRenderer.sharedMaterial;
-                    }
-                }
-
-                activeRunners.Add(newRunner);
-                runnerSpawnTimes[newRunner] = Time.time;
-                edgeFrameCounters[newRunner] = 0;
+                ActivateRunnerFromPool(runnerPool[i]);
                 spawned++;
             }
         }
+
+        // 2. If the pool was too small, dynamically instantiate new ones on-demand
+        while (spawned < amountToSpawn && runnerPool.Count < poolSize)
+        {
+            GameObject newObj = CreateNewPoolObject();
+            ActivateRunnerFromPool(newObj);
+            spawned++;
+        }
+    }
+
+    private void ActivateRunnerFromPool(GameObject runner)
+    {
+        runner.transform.SetParent(transform); // Ensure it is reparented to the crowd manager
+        runner.transform.position = transform.position;
+        runner.transform.localRotation = Quaternion.identity;
+        runner.SetActive(true);
+
+        Animator anim = runner.GetComponentInChildren<Animator>();
+        if (anim != null && cachedAnimatorController != null)
+        {
+            anim.runtimeAnimatorController = cachedAnimatorController;
+            if (activeRunners.Count > 0 && activeRunners[0] != null)
+            {
+                Animator leadAnim = activeRunners[0].GetComponentInChildren<Animator>();
+                if (leadAnim != null)
+                {
+                    AnimatorStateInfo stateInfo = leadAnim.GetCurrentAnimatorStateInfo(0);
+                    anim.Play(stateInfo.fullPathHash, 0, stateInfo.normalizedTime);
+                }
+            }
+        }
+
+        if (activeRunners.Count > 0 && activeRunners[0] != null)
+        {
+            SkinnedMeshRenderer leadRenderer = activeRunners[0].GetComponentInChildren<SkinnedMeshRenderer>();
+            SkinnedMeshRenderer newRenderer = runner.GetComponentInChildren<SkinnedMeshRenderer>();
+            if (leadRenderer != null && newRenderer != null)
+            {
+                newRenderer.sharedMaterial = leadRenderer.sharedMaterial;
+            }
+        }
+
+        activeRunners.Add(runner);
+        runnerSpawnTimes[runner] = Time.time;
+        edgeFrameCounters[runner] = 0;
     }
 
     public void MultiplyClones(int factor)

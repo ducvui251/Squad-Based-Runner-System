@@ -15,6 +15,7 @@ public class UIManager : MonoBehaviour
     [SerializeField] private GameObject mainMenuPanel;
     [SerializeField] private GameObject hudPanel;
     [SerializeField] private GameObject gameOverPanel;
+    [SerializeField] private GameObject youWinPanel;
 
     [Header("HUD Elements")]
     [SerializeField] private TMP_Text cloneCountText;
@@ -23,6 +24,9 @@ public class UIManager : MonoBehaviour
     [Header("Game Over Elements")]
     [SerializeField] private TMP_Text finalScoreText;
     [SerializeField] private Button restartButton;
+
+    [Header("You Win Elements")]
+    [SerializeField] private TMP_Text winScoreText;
 
     [Header("Level Progress Settings")]
     [SerializeField] private float trackLength = 150f; // Distance from player start to level end
@@ -57,6 +61,7 @@ public class UIManager : MonoBehaviour
         if (mainMenuPanel != null) mainMenuPanel.SetActive(true);
         if (hudPanel != null) hudPanel.SetActive(false);
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        if (youWinPanel != null) youWinPanel.SetActive(false);
 
         // Bind restart button callback
         if (restartButton != null)
@@ -101,6 +106,23 @@ public class UIManager : MonoBehaviour
                 progressRect.pivot = new Vector2(0.5f, 1f);
                 progressRect.anchoredPosition = new Vector2(0f, -110f); // 110px down from top (below clone count)
                 progressRect.sizeDelta = new Vector2(400f, 25f);
+            }
+        }
+
+        if (winScoreText != null)
+        {
+            RectTransform rect = winScoreText.GetComponent<RectTransform>();
+            if (rect != null)
+            {
+                rect.anchorMin = new Vector2(0.5f, 0.5f);
+                rect.anchorMax = new Vector2(0.5f, 0.5f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.anchoredPosition = new Vector2(0f, 0f);
+                rect.sizeDelta = new Vector2(400f, 60f);
+
+                winScoreText.alignment = TextAlignmentOptions.Center;
+                winScoreText.fontSize = 32f;
+                winScoreText.color = Color.white;
             }
         }
     }
@@ -172,26 +194,11 @@ public class UIManager : MonoBehaviour
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
     }
 
-    private int GetVisualCount()
-    {
-        if (playerTransform == null) return 0;
-
-        int visualCount = 0;
-        foreach (Transform child in playerTransform)
-        {
-            if (child.gameObject.activeSelf && child.GetComponentInChildren<SkinnedMeshRenderer>() != null && !child.name.Contains("Camera"))
-            {
-                visualCount++;
-            }
-        }
-        return visualCount;
-    }
-
     private void UpdateHUD()
     {
         if (playerCrowd != null && cloneCountText != null)
         {
-            int visualCount = GetVisualCount();
+            int visualCount = playerCrowd.ActiveRunnerCount;
             cloneCountText.text = visualCount.ToString();
         }
 
@@ -204,8 +211,8 @@ public class UIManager : MonoBehaviour
             if (progress >= 0.99f && !gameOverTriggered)
             {
                 gameOverTriggered = true;
-                int finalScore = GetVisualCount();
-                ShowGameOver(finalScore);
+                int finalScore = playerCrowd.ActiveRunnerCount;
+                ShowYouWin(finalScore);
             }
         }
     }
@@ -231,6 +238,26 @@ public class UIManager : MonoBehaviour
             finalScoreText.text = "Final Score: " + finalScore;
         }
     }
+
+    public void ShowYouWin(int finalScore)
+    {
+        if (!IsGameActive)
+        {
+            return;
+        }
+
+        IsGameActive = false;
+        Time.timeScale = 1f; // Restore normal time in case slow-mo was applied
+
+        if (hudPanel != null) hudPanel.SetActive(false);
+        if (youWinPanel != null) youWinPanel.SetActive(true);
+
+        if (winScoreText != null)
+        {
+            winScoreText.text = "Clones Saved: " + finalScore;
+        }
+    }
+
 
     public void RestartGame()
     {
