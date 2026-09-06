@@ -1,0 +1,111 @@
+# Builds the WebGL player on every push and deploys it to GitHub Pages.
+#
+# ONE-TIME SETUP REQUIRED — Unity license secrets (takes ~10 minutes, do it once):
+#   1. In GitHub → Settings → Secrets and variables → Actions, add:
+#        UNITY_EMAIL        (your Unity account email)
+#        UNITY_PASSWORD     (your Unity account password — needs the project set as a
+#                            manual activation target, or use a Personal Access Token)
+#        UNITY_LICENSE      (the license you activate in step 3)
+#   2. Run the "Activate Unity license" workflow ONCE (see activate.yml in this folder),
+#      download the .alf file it produces, activate it at https://license.unity3d.com/manual,
+#      and paste the returned XML into a secret named UNITY_LICENSE.
+#   3. After the first successful build, enable GitHub Pages (Settings → Pages) with
+#      branch "gh-pages". The demo then lives at https://<user>.github.io/<repo>/.
+#
+# GameCI docs: https://game.ci/docs/github/getting-started
+# If the exact editor patch (e.g. 6000.3.16f1) has no GameCI Docker image, pick the
+# nearest published 6000.3.x in the `unityVersion` field below.
+
+name: Build WebGL
+
+on:
+  push:
+    branches: [master, main]
+    paths-ignore: ['**.md', '**.txt']
+  workflow_dispatch:          # allow manual trigger from the Actions tab
+
+env:
+  UNITY_VERSION: 6000.3.16f1  # keep in sync with ProjectSettings/ProjectVersion.txt
+  BUILD_PATH: build/WebGL/WebGL
+
+jobs:
+  build:
+    name: Build WebGL (${{ env.UNITY_VERSION }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Cache Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ runner.os }}-${{ hashFiles('Packages/manifest.json', 'Packages/packages-lock.json') }}
+          restore-keys: |
+            Library-${{ runner.os }}-
+
+      - name: Build project (WebGL)
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          targetPlatform: WebGL
+          unityVersion: ${{ env.UNITY_VERSION }}
+          projectPath: .
+          allowDirtyBuild: false
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webgl-build
+          path: ${{ env.BUILD_PATH }}
+
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    steps:
+      - name: Download build
+        uses: actions/download-artifact@v4
+        with:
+          name: webgl-build
+          path: build
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: build
+          publish_branch: gh-pages
+          force_orphan: true
+
+# -------------------------------------------------------------------------------------
+# OPTIONAL — also push the build to itch.io using itch's `butler` CLI.
+# Add secrets: BUTLER_API_KEY (from https://itch.io/user/settings/api-keys), ITCH_USER,
+# ITCH_GAME, and uncomment this job.
+# -------------------------------------------------------------------------------------
+#  deploy-itch:
+#    name: Publish to itch.io
+#    needs: build
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/download-artifact@v4
+#        with:
+#          name: webgl-build
+#          path: build
+#      - name: Push to itch.io
+#        uses: webberzhou/butler-publish@v2
+#        env:
+#          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+#        with:
+#          user: ${{ secrets.ITCH_USER }}
+#          game: ${{ secrets.ITCH_GAME }}
+#          version: ${{ github.sha }}
+#          path: build
+#          channel: webgl

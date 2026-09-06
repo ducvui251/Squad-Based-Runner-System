@@ -1,0 +1,39 @@
+# ONE-TIME: generate the license activation file (.alf) needed to build in CI.
+#
+# How to use (first time only, ~10 min):
+#   1. Actions tab → "Activate Unity license" → Run workflow.
+#   2. Download the `Unity_v6000.3.16f1.alf` artifact.
+#   3. Upload it at https://license.unity3d.com/manual and activate.
+#   4. Copy the returned license XML into a GitHub secret named UNITY_LICENSE.
+#   5. Also add UNITY_EMAIL and UNITY_PASSWORD secrets.
+#   6. Now the "Build WebGL" workflow will pass its license check.
+#
+# Then this workflow is never needed again (unless your license expires/renews).
+
+name: Activate Unity license
+
+on:
+  workflow_dispatch:
+
+env:
+  UNITY_VERSION: 6000.3.16f1
+
+jobs:
+  activation:
+    name: Request manual activation file
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Request .alf file
+        id: get-alf
+        uses: game-ci/unity-request-activation-file@v3
+        with:
+          unityVersion: ${{ env.UNITY_VERSION }}
+
+      - name: Upload .alf artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Unity_v${{ env.UNITY_VERSION }}.alf
+          path: ${{ steps.get-alf.outputs.alfFilePath }}
