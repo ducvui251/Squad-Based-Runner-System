@@ -1,6 +1,10 @@
 {
   "dependencies": {
-    "com.unity.ai.assistant": "2.9.0-pre.2",
+    "com.ivanmurzak.unity.mcp": "0.90.0",
+    "com.ivanmurzak.unity.mcp.animation": "1.2.32",
+    "com.ivanmurzak.unity.mcp.cinemachine": "1.0.17",
+    "com.ivanmurzak.unity.mcp.inputsystem": "1.0.17",
+    "com.ivanmurzak.unity.mcp.probuilder": "1.2.31",
     "com.unity.ai.inference": "2.6.1",
     "com.unity.ai.navigation": "2.0.12",
     "com.unity.cinemachine": "3.1.6",
@@ -48,5 +52,15 @@
     "com.unity.modules.vr": "1.0.0",
     "com.unity.modules.wind": "1.0.0",
     "com.unity.modules.xr": "1.0.0"
-  }
+  },
+  "scopedRegistries": [
+    {
+      "name": "package.openupm.com",
+      "url": "https://package.openupm.com",
+      "scopes": [
+        "com.ivanmurzak",
+        "extensions.unity"
+      ]
+    }
+  ]
 }

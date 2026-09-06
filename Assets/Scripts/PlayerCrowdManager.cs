@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -8,7 +9,12 @@ public class PlayerCrowdManager : MonoBehaviour
     [SerializeField] private float spacingFactor = 0.75f;
     [SerializeField] private float lerpSpeed = 7f;
     [SerializeField] private int poolSize = 200;
-    [SerializeField] private int maxVisualClones = 100;       // Maximum active visual clones to prevent lag
+
+    [Header("Crowd Representation")]
+    [SerializeField, Min(1)] private int oneToOneLimit = 60;
+    [SerializeField, Min(61)] private int compressionEndLogicalCount = 200;
+    [SerializeField, Min(1)] private int maxVisualClones = 100;
+    [SerializeField, Range(0.4f, 1f)] private float maxCompressionSpacingMultiplier = 0.7f;
 
     private List<GameObject> runnerPool = new List<GameObject>();
     private List<GameObject> activeRunners = new List<GameObject>();
@@ -27,6 +33,8 @@ public class PlayerCrowdManager : MonoBehaviour
     private const int EDGE_CONFIRM_FRAMES = 3;                    // Clone must be off-edge for this many consecutive frames before falling
     private const float CLONE_GRACE_PERIOD = 0.5f;                // Seconds after spawn before a clone can be checked for edge falling
     private const float EDGE_MARGIN = 0.3f;                       // How far outside the track boundary before considering a clone "off-edge"
+    private const int MAX_SAFE_POOL_SIZE = 500;
+    private const int MAX_SAFE_VISUAL_CLONES = MAX_SAFE_POOL_SIZE;
 
     private bool isFighting = false;
     private float enemyTargetX = 0f;
@@ -41,18 +49,74 @@ public class PlayerCrowdManager : MonoBehaviour
     public float EnemyTargetX => enemyTargetX;
     public bool IsGameOver => hasTriggeredGameOver;
     public List<GameObject> ActiveRunners => activeRunners;
-    public int ActiveRunnerCount => activeRunners.Count;
+    public int LogicalRunnerCount { get; private set; }
+    public int VisualRunnerCount => activeRunners.Count;
+    public int ActiveRunnerCount => LogicalRunnerCount;
+
+
+    private void OnValidate()
+    {
+        poolSize = Mathf.Clamp(poolSize, 1, MAX_SAFE_POOL_SIZE);
+        oneToOneLimit = Mathf.Clamp(oneToOneLimit, 1, MAX_SAFE_POOL_SIZE);
+        compressionEndLogicalCount = Mathf.Clamp(
+            compressionEndLogicalCount,
+            oneToOneLimit + 1,
+            int.MaxValue);
+        maxVisualClones = Mathf.Clamp(maxVisualClones, oneToOneLimit, MAX_SAFE_VISUAL_CLONES);
+        poolSize = Mathf.Clamp(Mathf.Max(poolSize, maxVisualClones), 1, MAX_SAFE_POOL_SIZE);
+    }
 
     private void Start()
     {
+        OnValidate();
         hasTriggeredGameOver = false;
         gameActiveTimer = 0f;
         playerCc = GetComponent<CharacterController>();
         lastGroundedY = transform.position.y;
+
+        if (!ValidateRunnerPrefab())
+        {
+            enabled = false;
+            return;
+        }
+
+        CountBadge.Attach(transform, () => ActiveRunnerCount, CountBadge.PlayerBlue, heightAbove: 2.2f);
+
         InitializePool();
         InitializeLeadPlayer();
+        LogicalRunnerCount = activeRunners.Count;
+        SyncVisualCrowdToLogicalCount();
         DetectTrackWidth();
         currentSpacingFactor = spacingFactor;
+    }
+
+    private bool ValidateRunnerPrefab()
+    {
+        if (runnerPrefab == null)
+        {
+            Debug.LogError("PlayerCrowdManager: runnerPrefab is not assigned. Assign a visual-only runner prefab.", this);
+            return false;
+        }
+
+        if (runnerPrefab == gameObject || runnerPrefab.GetComponentInChildren<PlayerCrowdManager>(true) != null)
+        {
+            Debug.LogError("PlayerCrowdManager: runnerPrefab must be a visual-only clone prefab. It cannot be the player prefab or contain PlayerCrowdManager.", runnerPrefab);
+            return false;
+        }
+
+        if (runnerPrefab.GetComponentInChildren<PlayerController>(true) != null)
+        {
+            Debug.LogError("PlayerCrowdManager: runnerPrefab contains PlayerController. Use a stripped-down visual runner prefab instead.", runnerPrefab);
+            return false;
+        }
+
+        if (runnerPrefab.GetComponentInChildren<CharacterController>(true) != null)
+        {
+            Debug.LogError("PlayerCrowdManager: runnerPrefab contains CharacterController. Use a mesh/animator-only runner prefab instead.", runnerPrefab);
+            return false;
+        }
+
+        return true;
     }
 
     private void DetectTrackWidth()
@@ -64,11 +128,9 @@ public class PlayerCrowdManager : MonoBehaviour
             Collider roadCol = hit.collider;
             if (roadCol != null && !roadCol.isTrigger)
             {
-                string colName = roadCol.name.ToLower();
-                // Filter out non-road geometry like obstacles, saws, gates, or doors
-                if (!colName.Contains("saw") && !colName.Contains("cone") && 
-                    !colName.Contains("gate") && !colName.Contains("door") && 
-                    !colName.Contains("obstacle") && !colName.Contains("spike"))
+                // Filter out non-road geometry by the collider name so missing project tags
+                // cannot generate runtime warnings.
+                if (!IsObstacleCollider(roadCol))
                 {
                     Bounds bounds = roadCol.bounds;
                     float width = bounds.size.x;
@@ -102,6 +164,24 @@ public class PlayerCrowdManager : MonoBehaviour
             rightLimit = transform.position.x + 10f; // Dynamic fallback relative to player
         }
     }
+
+    private static readonly string[] ObstacleNameTokens = { "saw", "cone", "gate", "door", "obstacle", "spike" };
+
+    /// <summary>
+    /// Returns true if the collider belongs to non-road geometry (saws, cones, gates, doors,
+    /// or spikes) based on its name. Project-specific tags are intentionally not required.
+    /// </summary>
+    private bool IsObstacleCollider(Collider col)
+    {
+        string name = col.name;
+        foreach (string token in ObstacleNameTokens)
+        {
+            if (name.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        }
+
+        return false;
+    }
+
 
     private GameObject CreateNewPoolObject()
     {
@@ -150,6 +230,11 @@ public class PlayerCrowdManager : MonoBehaviour
 
         foreach (Transform child in transform)
         {
+            if (!child.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
             if (child.GetComponentInChildren<SkinnedMeshRenderer>() != null && !child.name.Contains("Camera"))
             {
                 activeRunners.Add(child.gameObject);
@@ -173,7 +258,7 @@ public class PlayerCrowdManager : MonoBehaviour
 
         if (activeRunners.Count == 0)
         {
-            SpawnClones(1);
+            TryActivatePooledRunner();
         }
     }
 
@@ -210,8 +295,8 @@ public class PlayerCrowdManager : MonoBehaviour
                 return;
             }
 
-            // Check 2: All runner clones have been lost
-            if (activeRunners.Count == 0)
+            // Check 2: All logical runners have been lost
+            if (LogicalRunnerCount == 0)
             {
                 hasTriggeredGameOver = true;
                 if (UIManager.Instance != null)
@@ -292,25 +377,6 @@ public class PlayerCrowdManager : MonoBehaviour
     {
         if (activeRunners.Count == 0) return;
 
-        // Get player color
-        Color playerColor = Color.blue;
-        Animator leadAnim = GetLeadAnimator();
-        if (leadAnim != null)
-        {
-            Renderer pr = leadAnim.GetComponentInChildren<Renderer>();
-            if (pr != null && pr.sharedMaterial != null)
-            {
-                if (pr.sharedMaterial.HasProperty("_Color"))
-                {
-                    playerColor = pr.sharedMaterial.color;
-                }
-                else if (pr.sharedMaterial.HasProperty("_BaseColor"))
-                {
-                    playerColor = pr.sharedMaterial.GetColor("_BaseColor");
-                }
-            }
-        }
-
         // We scan for colliders within 6 meters around the player's crowd center
         int count = Physics.OverlapSphereNonAlloc(transform.position, 6f, overlapResults);
 
@@ -339,9 +405,7 @@ public class PlayerCrowdManager : MonoBehaviour
 
                 if (closestRunner != null)
                 {
-                    // Eliminate both!
-                    RemoveRunner(closestRunner);
-                    enemy.KillByPlayer(playerColor);
+                    ResolveEnemyCombat(enemy, closestRunner);
                 }
             }
         }
@@ -365,13 +429,9 @@ public class PlayerCrowdManager : MonoBehaviour
         {
             if (!cc.isGrounded && cc.velocity.y < -1f)
             {
-                if (leadAnim.HasState(0, Animator.StringToHash("Falling")))
+                if (!TryPlayAnimationState(leadAnim, "Falling"))
                 {
-                    leadAnim.Play("Falling");
-                }
-                else if (leadAnim.HasState(0, Animator.StringToHash("Fall")))
-                {
-                    leadAnim.Play("Fall");
+                    TryPlayAnimationState(leadAnim, "Fall");
                 }
             }
             else if (cc.isGrounded)
@@ -381,11 +441,11 @@ public class PlayerCrowdManager : MonoBehaviour
                 {
                     if (cachedAnimatorController != null && isStickmanAnimator)
                     {
-                        leadAnim.Play("Run");
+                        TryPlayAnimationState(leadAnim, "Run");
                     }
                     else
                     {
-                        leadAnim.Play("Fast Run");
+                        TryPlayAnimationState(leadAnim, "Fast Run");
                     }
                 }
             }
@@ -431,33 +491,130 @@ public class PlayerCrowdManager : MonoBehaviour
         }
     }
 
-    public void SpawnClones(int amount)
+    public void AddLogicalRunners(int amount)
     {
-        int currentCount = activeRunners.Count;
-        if (currentCount >= maxVisualClones) return;
+        if (amount <= 0) return;
 
-        int amountToSpawn = Mathf.Min(amount, maxVisualClones - currentCount);
-        int spawned = 0;
+        long targetCount = (long)LogicalRunnerCount + amount;
+        LogicalRunnerCount = targetCount > int.MaxValue ? int.MaxValue : (int)targetCount;
+        SyncVisualCrowdToLogicalCount();
+    }
 
-        // 1. First, try to find existing inactive objects in the pool
+    public void MultiplyLogicalRunners(int factor)
+    {
+        if (factor <= 0)
+        {
+            LogicalRunnerCount = 0;
+        }
+        else
+        {
+            long targetCount = (long)LogicalRunnerCount * factor;
+            LogicalRunnerCount = targetCount > int.MaxValue ? int.MaxValue : (int)targetCount;
+        }
+
+        SyncVisualCrowdToLogicalCount();
+    }
+
+    public void RemoveLogicalRunners(int amount)
+    {
+        ApplyLogicalLoss(amount, false);
+    }
+
+    public void SpawnClones(int amount) => AddLogicalRunners(amount);
+
+    public void MultiplyClones(int factor) => MultiplyLogicalRunners(factor);
+
+    private void ApplyLogicalLoss(int amount, bool allowVisualReplenish, bool checkGameOver = true)
+    {
+        if (amount <= 0 || LogicalRunnerCount <= 0) return;
+
+        LogicalRunnerCount = Mathf.Max(0, LogicalRunnerCount - amount);
+        SyncVisualCrowdToLogicalCount(allowVisualReplenish || LogicalRunnerCount <= oneToOneLimit);
+        if (checkGameOver)
+        {
+            CheckLogicalGameOver();
+        }
+    }
+
+    private void CheckLogicalGameOver()
+    {
+        if (LogicalRunnerCount > 0 || hasTriggeredGameOver || !UIManager.IsGameActive || gameActiveTimer <= GAME_OVER_GRACE_PERIOD)
+        {
+            return;
+        }
+
+        hasTriggeredGameOver = true;
+        if (UIManager.Instance != null)
+        {
+            UIManager.Instance.ShowGameOver(0);
+        }
+    }
+
+    private int GetDesiredVisualRunnerCount(int logicalCount)
+    {
+        if (logicalCount <= 0) return 0;
+
+        int visualCap = Mathf.Max(oneToOneLimit, maxVisualClones);
+        if (logicalCount <= oneToOneLimit)
+        {
+            return Mathf.Clamp(logicalCount, 0, visualCap);
+        }
+
+        if (logicalCount >= compressionEndLogicalCount)
+        {
+            return visualCap;
+        }
+
+        float t = Mathf.InverseLerp(oneToOneLimit, compressionEndLogicalCount, logicalCount);
+        int desiredCount = Mathf.RoundToInt(Mathf.Lerp(oneToOneLimit, visualCap, t));
+        if (visualCap > oneToOneLimit)
+        {
+            desiredCount = Mathf.Max(oneToOneLimit + 1, desiredCount);
+        }
+        return Mathf.Clamp(desiredCount, 0, visualCap);
+    }
+
+    private void SyncVisualCrowdToLogicalCount(bool allowVisualGrowth = true)
+    {
+        int desiredVisualCount = Mathf.Min(GetDesiredVisualRunnerCount(LogicalRunnerCount), poolSize);
+
+        while (activeRunners.Count > desiredVisualCount)
+        {
+            DeactivateVisualRunner(activeRunners[activeRunners.Count - 1]);
+        }
+
+        if (!allowVisualGrowth)
+        {
+            return;
+        }
+
+        while (activeRunners.Count < desiredVisualCount)
+        {
+            if (!TryActivatePooledRunner())
+            {
+                break;
+            }
+        }
+    }
+
+    private bool TryActivatePooledRunner()
+    {
         for (int i = 0; i < runnerPool.Count; i++)
         {
-            if (spawned >= amountToSpawn) break;
-
-            if (!runnerPool[i].activeSelf)
+            if (!runnerPool[i].activeSelf && !fallingRunners.Contains(runnerPool[i]))
             {
                 ActivateRunnerFromPool(runnerPool[i]);
-                spawned++;
+                return true;
             }
         }
 
-        // 2. If the pool was too small, dynamically instantiate new ones on-demand
-        while (spawned < amountToSpawn && runnerPool.Count < poolSize)
+        if (runnerPool.Count >= poolSize)
         {
-            GameObject newObj = CreateNewPoolObject();
-            ActivateRunnerFromPool(newObj);
-            spawned++;
+            return false;
         }
+
+        ActivateRunnerFromPool(CreateNewPoolObject());
+        return true;
     }
 
     private void ActivateRunnerFromPool(GameObject runner)
@@ -476,8 +633,7 @@ public class PlayerCrowdManager : MonoBehaviour
                 Animator leadAnim = activeRunners[0].GetComponentInChildren<Animator>();
                 if (leadAnim != null)
                 {
-                    AnimatorStateInfo stateInfo = leadAnim.GetCurrentAnimatorStateInfo(0);
-                    anim.Play(stateInfo.fullPathHash, 0, stateInfo.normalizedTime);
+                    SyncAnimatorState(anim, leadAnim);
                 }
             }
         }
@@ -497,30 +653,133 @@ public class PlayerCrowdManager : MonoBehaviour
         edgeFrameCounters[runner] = 0;
     }
 
-    public void MultiplyClones(int factor)
+    private void SyncAnimatorState(Animator targetAnim, Animator sourceAnim)
     {
-        int currentCount = activeRunners.Count;
-        int targetCount = currentCount * factor;
-        int amountToSpawn = targetCount - currentCount;
-
-        if (amountToSpawn > 0)
+        if (targetAnim == null || sourceAnim == null || targetAnim.runtimeAnimatorController == null)
         {
-            SpawnClones(amountToSpawn);
+            return;
         }
+
+        AnimatorStateInfo stateInfo = sourceAnim.GetCurrentAnimatorStateInfo(0);
+        if (targetAnim.HasState(0, stateInfo.fullPathHash))
+        {
+            targetAnim.Play(stateInfo.fullPathHash, 0, stateInfo.normalizedTime);
+            return;
+        }
+
+        if (TryPlayAnimationState(targetAnim, "Run", stateInfo.normalizedTime))
+        {
+            return;
+        }
+
+        TryPlayAnimationState(targetAnim, "Fast Run", stateInfo.normalizedTime);
+    }
+
+    private bool TryPlayAnimationState(Animator anim, string stateName, float normalizedTime = 0f)
+    {
+        if (anim == null || anim.runtimeAnimatorController == null)
+        {
+            return false;
+        }
+
+        int stateHash = Animator.StringToHash(stateName);
+        if (!anim.HasState(0, stateHash))
+        {
+            return false;
+        }
+
+        anim.Play(stateHash, 0, normalizedTime);
+        return true;
     }
 
     public RuntimeAnimatorController CachedAnimatorController => cachedAnimatorController;
 
     public void RemoveRunner(GameObject runner)
     {
-        if (activeRunners.Contains(runner))
+        if (runner == null) return;
+
+        Color runnerColor = GetRunnerColor(runner, Color.blue);
+        RemoveRunnerByHazard(runner, runner.transform.position + Vector3.up * 0.5f, runnerColor);
+    }
+
+    public bool RemoveRunnerByHazard(GameObject visualRunner, Vector3 effectPosition, Color effectColor)
+    {
+        if (visualRunner == null || !activeRunners.Contains(visualRunner) || LogicalRunnerCount <= 0)
         {
-            activeRunners.Remove(runner);
-            runnerSpawnTimes.Remove(runner);
-            fallingRunnerVelocities.Remove(runner);
-            edgeFrameCounters.Remove(runner);
-            runner.SetActive(false);
+            return false;
         }
+
+        int logicalLoss = GetLogicalLossForVisualRunner();
+        DeathPopEffect.Create(effectPosition, effectColor);
+        DeactivateVisualRunner(visualRunner);
+        ApplyLogicalLoss(logicalLoss, false);
+        return true;
+    }
+
+    public bool ResolveEnemyCombat(Enemy enemy, GameObject visualRunner)
+    {
+        if (enemy == null || enemy.IsDead || visualRunner == null || !activeRunners.Contains(visualRunner) || LogicalRunnerCount <= 0)
+        {
+            return false;
+        }
+
+        Color playerColor = GetPlayerColor();
+        int logicalLoss = GetLogicalLossForVisualRunner();
+        DeactivateVisualRunner(visualRunner);
+        ApplyLogicalLoss(logicalLoss, false);
+        enemy.KillByPlayer(playerColor);
+        return true;
+    }
+
+    private int GetLogicalLossForVisualRunner()
+    {
+        if (LogicalRunnerCount <= 0) return 0;
+        if (activeRunners.Count <= 0) return 1;
+
+        float representedRunners = LogicalRunnerCount / Mathf.Max(1f, activeRunners.Count);
+        return Mathf.Clamp(Mathf.RoundToInt(representedRunners), 1, LogicalRunnerCount);
+    }
+
+    private void DeactivateVisualRunner(GameObject runner)
+    {
+        if (runner == null) return;
+
+        activeRunners.Remove(runner);
+        runnerSpawnTimes.Remove(runner);
+        fallingRunnerVelocities.Remove(runner);
+        edgeFrameCounters.Remove(runner);
+        runner.transform.SetParent(transform);
+        runner.SetActive(false);
+    }
+
+    private Color GetPlayerColor()
+    {
+        Animator leadAnim = GetLeadAnimator();
+        if (leadAnim == null)
+        {
+            return Color.blue;
+        }
+
+        return GetRunnerColor(leadAnim.gameObject, Color.blue);
+    }
+
+    private Color GetRunnerColor(GameObject runner, Color fallback)
+    {
+        Renderer renderer = runner != null ? runner.GetComponentInChildren<Renderer>() : null;
+        if (renderer != null && renderer.sharedMaterial != null)
+        {
+            if (renderer.sharedMaterial.HasProperty("_Color"))
+            {
+                return renderer.sharedMaterial.color;
+            }
+
+            if (renderer.sharedMaterial.HasProperty("_BaseColor"))
+            {
+                return renderer.sharedMaterial.GetColor("_BaseColor");
+            }
+        }
+
+        return fallback;
     }
 
     public GameObject GetClosestActiveRunner(Vector3 checkPosition, float maxDistance)
@@ -551,6 +810,7 @@ public class PlayerCrowdManager : MonoBehaviour
 
     private void MakeRunnerFall(GameObject runner)
     {
+        int logicalLoss = GetLogicalLossForVisualRunner();
         activeRunners.Remove(runner);
         runnerSpawnTimes.Remove(runner);
         edgeFrameCounters.Remove(runner);
@@ -562,19 +822,17 @@ public class PlayerCrowdManager : MonoBehaviour
         Animator cloneAnim = runner.GetComponentInChildren<Animator>();
         if (cloneAnim != null)
         {
-            if (cloneAnim.HasState(0, Animator.StringToHash("Falling")))
+            if (!TryPlayAnimationState(cloneAnim, "Falling"))
             {
-                cloneAnim.Play("Falling");
-            }
-            else if (cloneAnim.HasState(0, Animator.StringToHash("Fall")))
-            {
-                cloneAnim.Play("Fall");
+                TryPlayAnimationState(cloneAnim, "Fall");
             }
         }
 
+        ApplyLogicalLoss(logicalLoss, false, false);
+
         // Trigger zoom game over if this was the last clone falling off the edge
         // Also respect the grace period to prevent false triggers at startup
-        if (UIManager.IsGameActive && !hasTriggeredGameOver && gameActiveTimer > GAME_OVER_GRACE_PERIOD && activeRunners.Count == 0)
+        if (UIManager.IsGameActive && !hasTriggeredGameOver && gameActiveTimer > GAME_OVER_GRACE_PERIOD && LogicalRunnerCount == 0)
         {
             hasTriggeredGameOver = true;
             if (UIManager.Instance != null)
@@ -627,6 +885,12 @@ public class PlayerCrowdManager : MonoBehaviour
         bool isPlayerGrounded = playerCc == null || playerCc.isGrounded;
 
         float goldenAngle = 137.5f * Mathf.Deg2Rad;
+        float representationRatio = LogicalRunnerCount / Mathf.Max(1f, activeRunners.Count);
+        float compressionT = representationRatio <= 1f
+            ? 0f
+            : Mathf.InverseLerp(oneToOneLimit, compressionEndLogicalCount, LogicalRunnerCount);
+        float densityMultiplier = Mathf.Lerp(1f, maxCompressionSpacingMultiplier, compressionT);
+        float formationSpacing = currentSpacingFactor * densityMultiplier;
 
         for (int i = count - 1; i >= 0; i--)
         {
@@ -689,7 +953,7 @@ public class PlayerCrowdManager : MonoBehaviour
                 }
             }
 
-            float distance = currentSpacingFactor * Mathf.Sqrt(i);
+            float distance = formationSpacing * Mathf.Sqrt(i);
             float angle = i * goldenAngle;
 
             float x = distance * Mathf.Cos(angle);
