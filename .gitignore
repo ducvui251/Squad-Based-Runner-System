@@ -1,0 +1,72 @@
+# This file controls what is committed to git.
+# Reference: https://github.com/github/gitignore/blob/main/Unity.gitignore
+
+# Unity generated folders
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+
+# Unity generated files
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.userprefs
+*.csproj.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# MCP / editor-local settings (never commit local config)
+.mcp.json
+UserSettings/
+
+# Local agent config (not game code)
+.claude/
+.agents/
+.kilo/
+.kilocode/
+.token-optimizer/
+.codex/config.toml
+
+# Local diagnostic captures
+/badge_scan.json
+/badges_*.png
+/hazards_playmode.png
+
+# Unity Version Control / Plastic SCM
+.plastic/
+
+# Unity crash-recovery scene dumps
+Assets/_Recovery/
+
+# Older / alternate ignore configs
+.gitignore.conf
+ignore.conf
+
+# Unity 6 IDE solution (new XML format)
+*.slnx
+
+# NOTE: Assets/Screenshots/*.png is committed intentionally for the README — do not
+# add a rule here that ignores Assets/Screenshots/.

@@ -8,6 +8,10 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float forwardSpeed = 6f;       // Constant forward running speed
     [SerializeField] private float horizontalSpeed = 8f;    // Steer speed left/right
     [SerializeField] private float dragSensitivity = 0.05f; // Mouse/Touch drag sensitivity
+    [SerializeField] private float startForwardSpeed = 6f;
+    [SerializeField] private float maxForwardSpeed = 6f;
+    [SerializeField] private float speedRampStartZ = 0f;
+    [SerializeField] private float speedRampEndZ = 999f;
 
     [Header("Jumping")]
     [SerializeField] private float jumpForce = 8f;
@@ -16,8 +20,17 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float jumpBufferTime = 0.1f;
 
     // Public properties to sync physics with PlayerCrowdManager
-    public float ForwardSpeed => forwardSpeed;
+    public float ForwardSpeed => GetForwardSpeed();
     public float Gravity => gravity;
+    public float JumpForce => jumpForce;
+    public bool IsGrounded => controller != null && controller.isGrounded;
+    public bool IsAirborne => controller != null && !controller.isGrounded;
+    public float HeightAboveGround => Mathf.Max(0f, transform.position.y);
+
+    public bool HasCleared(float obstacleHeight, float margin)
+    {
+        return HeightAboveGround >= obstacleHeight + Mathf.Max(0f, margin);
+    }
 
     private Camera mainCamera;
     private CharacterController controller;
@@ -28,6 +41,7 @@ public class PlayerController : MonoBehaviour
     // Input System references
     private Mouse mouse;
     private Keyboard keyboard;
+    private Touchscreen touchscreen;
 
     private PlayerCrowdManager crowdManager;
 
@@ -50,8 +64,7 @@ public class PlayerController : MonoBehaviour
         // Cache current devices each frame
         mouse = Mouse.current;
         keyboard = Keyboard.current;
-
-        if (mouse == null || keyboard == null) return;
+        touchscreen = Touchscreen.current;
 
         HandleMovement();
         HandleJumping();
@@ -71,7 +84,7 @@ public class PlayerController : MonoBehaviour
         }
 
         float inputX = 0f;
-        float currentForwardSpeed = forwardSpeed;
+        float currentForwardSpeed = GetForwardSpeed();
 
         bool isFighting = crowdManager != null && crowdManager.IsFighting;
 
@@ -94,18 +107,23 @@ public class PlayerController : MonoBehaviour
         else
         {
             // 1. Mouse/Touch Drag Input (Holding click & dragging left/right)
-            if (mouse.leftButton.isPressed)
+            if (mouse != null && mouse.leftButton.isPressed)
             {
                 float dragDeltaX = mouse.delta.ReadValue().x;
                 inputX = dragDeltaX * dragSensitivity;
             }
 
+            if (touchscreen != null && touchscreen.primaryTouch.press.isPressed)
+            {
+                inputX = touchscreen.primaryTouch.delta.ReadValue().x * dragSensitivity;
+            }
+
             // 2. Keyboard Fallback (A/D or Left/Right Arrow Keys)
-            if (keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed)
+            if (keyboard != null && (keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed))
             {
                 inputX = -1f;
             }
-            if (keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed)
+            if (keyboard != null && (keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed))
             {
                 inputX = 1f;
             }
@@ -135,7 +153,13 @@ public class PlayerController : MonoBehaviour
         }
 
         // Jump buffer — queue a jump if pressed slightly before landing
-        if (keyboard.spaceKey.wasPressedThisFrame)
+        bool jumpPressed = keyboard != null && keyboard.spaceKey.wasPressedThisFrame;
+        if (touchscreen != null && touchscreen.primaryTouch.press.wasPressedThisFrame)
+        {
+            jumpPressed = true;
+        }
+
+        if (jumpPressed)
         {
             jumpBufferTimer = jumpBufferTime;
         }
@@ -164,5 +188,12 @@ public class PlayerController : MonoBehaviour
         {
             velocity.y += gravity * Time.deltaTime;
         }
+    }
+
+    private float GetForwardSpeed()
+    {
+        if (maxForwardSpeed <= startForwardSpeed) return forwardSpeed;
+        float progress = Mathf.Clamp01((transform.position.z - speedRampStartZ) / Mathf.Max(0.01f, speedRampEndZ - speedRampStartZ));
+        return Mathf.Lerp(startForwardSpeed, maxForwardSpeed, progress);
     }
 }
