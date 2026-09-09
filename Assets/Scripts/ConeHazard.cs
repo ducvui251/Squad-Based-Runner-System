@@ -39,8 +39,13 @@ public class ConeHazard : MonoBehaviour
             // Kill on contact: any clone touching the cone is destroyed.
             bool touching = flatDelta.sqrMagnitude <= killRadius * killRadius;
 
-            // Safety net: eliminate clones that end up far off the road edge.
-            bool beyondRoadEdge = Mathf.Abs(runnerPosition.x) >= boundaryX - boundaryEliminationMargin;
+            // Safety net: eliminate clones that end up off the road edge near this
+            // cone. Without the Z gate, every cone in the scene can kill a runner
+            // anywhere on the level as soon as its X position crosses the boundary.
+            bool nearCone = Mathf.Abs(runnerPosition.z - transform.position.z) <=
+                killRadius + boundaryEliminationMargin;
+            bool beyondRoadEdge = nearCone &&
+                Mathf.Abs(runnerPosition.x) >= boundaryX - boundaryEliminationMargin;
 
             if (touching || beyondRoadEdge)
             {

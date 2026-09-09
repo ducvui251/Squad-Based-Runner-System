@@ -5,30 +5,55 @@ public class CircularSaw : MonoBehaviour
     [Header("Speed Settings")]
     [SerializeField] private float moveSpeed = 2f;
     [SerializeField] private float spinSpeed = 360f;
+    [SerializeField, Min(0f)] private float phaseOffset;
+    [SerializeField] private bool startAtRight;
 
     [Header("Collision Settings")]
     [Tooltip("Bán kính phát hiện lính chạm cưa để tiêu diệt.")]
     [SerializeField] private float killRadius = 0.8f;
+    [SerializeField] private bool useExplicitXLimits;
+    [SerializeField] private float leftLimitOverride = -2.1f;
+    [SerializeField] private float rightLimitOverride = 2.1f;
 
     private float leftLimit;
     private float rightLimit;
     private Vector3 startPosition;
     private PlayerCrowdManager cachedCrowdManager;
+    private float motionClock;
+
+    private void OnValidate()
+    {
+        moveSpeed = Mathf.Clamp(moveSpeed, 0.1f, 12f);
+        spinSpeed = Mathf.Clamp(spinSpeed, 0f, 1440f);
+        phaseOffset = Mathf.Max(0f, phaseOffset);
+        killRadius = Mathf.Clamp(killRadius, 0.05f, 1.5f);
+        leftLimitOverride = Mathf.Clamp(leftLimitOverride, -4.5f, 4.5f);
+        rightLimitOverride = Mathf.Clamp(rightLimitOverride, -4.5f, 4.5f);
+        if (rightLimitOverride < leftLimitOverride + 0.5f)
+        {
+            rightLimitOverride = Mathf.Min(4.5f, leftLimitOverride + 0.5f);
+        }
+    }
 
     private void Start()
     {
         startPosition = transform.position;
         cachedCrowdManager = FindFirstObjectByType<PlayerCrowdManager>();
+        motionClock = phaseOffset;
         DetectRoadBoundaries();
     }
 
     private void Update()
     {
+        if (!UIManager.IsGameActive) return;
+
         // 1. Tính toán di chuyển qua lại (Ping-Pong)
         float range = rightLimit - leftLimit;
         if (range > 0f)
         {
-            float offset = Mathf.PingPong(Time.time * moveSpeed, range);
+            motionClock += Time.deltaTime;
+            float offset = Mathf.PingPong(motionClock * moveSpeed, range);
+            if (startAtRight) offset = range - offset;
             float targetX = leftLimit + offset;
             transform.position = new Vector3(targetX, transform.position.y, transform.position.z);
         }
@@ -90,6 +115,13 @@ public class CircularSaw : MonoBehaviour
 
     private void DetectRoadBoundaries()
     {
+        if (useExplicitXLimits)
+        {
+            leftLimit = leftLimitOverride;
+            rightLimit = rightLimitOverride;
+            return;
+        }
+
         RaycastHit hit;
         if (Physics.Raycast(transform.position + Vector3.up * 5f, Vector3.down, out hit, 20f))
         {

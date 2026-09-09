@@ -1,249 +1,201 @@
 # SpiralSquad Project Agent Guide
 
-This is the living project constitution for SpiralSquad. Read it before changing gameplay, scenes, UI, project settings, packages, or build configuration. Keep it current whenever a setting, system boundary, target platform, or development milestone changes.
+This file defines project intent, implementation boundaries, collaboration preferences, and verification requirements. Read it before changing gameplay, scenes, UI, packages, or build configuration. Also read [.codex/AGENTS.md](.codex/AGENTS.md) for supplemental Unity-MCP workflow guidance. Explicit user instructions take priority over project guidance. When documentation disagrees with source assets or live state, investigate and record the discrepancy instead of silently treating either as current.
 
-The repository also contains `.codex/AGENTS.md`, which has additional Unity-MCP workflow and collaboration rules. User instructions take priority over both files.
+## 1. Collaboration and model routing
 
-## 1. Product mission
+Only use Astra when the user explicitly requests Astra for the task. Complexity, ambiguity, importance, available quota, or an orchestration preset does not authorize automatic escalation. Authorization persists for that task until changed, not for unrelated future tasks. Otherwise continue with the current model or available Sol/Luna routing. These are role preferences; never claim to switch models unless the environment actually supports and performs the switch.
 
-SpiralSquad is an original 3D crowd-runner: the player auto-runs forward, steers a growing squad through math gates, collects currency, survives hazards and enemy mobs, and reaches a finish reward.
-
-The intended direction is to clone and improve the *genre loop* of Crowd Master while keeping the implementation, assets, names, levels, and presentation original. Crowd Master is a reference for readable gate choices, short runner levels, crowd growth/loss, and satisfying encounters; do not copy protected assets, exact levels, UI, branding, or presentation.
-
-SpiralSquad's identity is the Fermat/golden-angle spiral crowd formation. Preserve that identity as the crowd system improves instead of replacing it with a generic grid or blob.
-
-Primary output target: a small, responsive, desktop/mobile-friendly WebGL build that runs in a browser without native-only dependencies. Treat browser size, memory, CPU, GPU, input, loading, and download size as product requirements from the beginning.
-
-## 2. Current verified baseline
-
-Baseline verified on 2026-09-03. Re-check these values after Unity upgrades, package changes, or build-target changes.
-
-| Area | Current value | Source of truth |
+| Model | Preferred role | Best fit |
 |---|---|---|
-| Unity editor | `6000.3.16f1` revision `a56f230f6470` | `ProjectSettings/ProjectVersion.txt` |
+| Astra, only when requested | Architect / lead engineer | Ambiguous diagnosis, repository investigation, architecture, risk analysis, specifications, and highly interconnected implementation |
+| Sol | Senior implementation engineer | Difficult but well-specified execution, integration, meaningful tests, ordinary debugging, and iteration |
+| Luna | Fast execution worker | Bounded small fixes, repetitive implementation, mechanical edits, focused tests, and cleanup |
+
+Choose by unresolved reasoning and integration risk, not code volume. When requested, Astra may both plan and implement; completing a plan is not a reason by itself to switch. Preserve continuity on important, interconnected work when the user's usage budget permits. Orchestration is useful for cost, speed, and independent parallel work; handoffs are optional.
+
+Before a substantial handoff, leave a concrete specification in the relevant implementation plan with the objective, repository state, evidence, decisions and rationale, rejected alternatives, risks, assumptions, exact files to touch, dependencies, ownership, "do not change" items, acceptance criteria, required checks, completed work, and remaining work. The receiving model must verify the repository against that handoff and surface contradictory evidence before changing architectural decisions. Parallel tasks need explicit file ownership; keep tightly coupled changes under one owner. Newly discovered uncertainty does not authorize invoking Astra.
+
+Work autonomously within the requested scope. Use existing authorization and make routine implementation decisions without repeated permission requests. Ask when missing intent materially changes the result or when a destructive or out-of-scope action requires new authority. A diagnosis/review requests evidence and explanation; an implementation/fix requests changes and verification. Treat `--dry-route` as a routing preview: describe the selected roles and intended actions without executing fixes, builds, play sessions, or other mutations.
+
+Preserve user edits in a dirty worktree. Do not revert unrelated files, broadly refactor, delete user assets, change build order, or install dependencies as incidental cleanup. Report the concrete result, relevant verification, and remaining limitations concisely.
+
+## 2. Product mission
+
+SpiralSquad is an original 3D crowd-runner: auto-run forward, steer a growing squad through math gates, collect currency, survive hazards and enemy mobs, and reach a finish reward. Crowd Master is a genre reference for readable choices, short levels, crowd growth/loss, and satisfying encounters. Keep implementation, assets, names, levels, UI, branding, and presentation original.
+
+The Fermat/golden-angle spiral formation is the project's defining mechanic. Preserve its identity while improving density, spacing, compression, feedback, and performance.
+
+The primary release target is a small, responsive WebGL build for desktop and mobile browsers. Download size, startup time, memory, CPU/GPU cost, touch input, and narrow layouts are product constraints from the start.
+
+## 3. Baseline and evidence
+
+Repository settings below were inspected on 2026-09-09. Live editor observations and earlier playtests are separate evidence; do not imply that a source inspection is a fresh runtime or browser test. Recheck affected values after editor, package, profile, or platform changes.
+
+| Area | Repository value | Source |
+|---|---|---|
+| Unity | `6000.3.16f1`, revision `a56f230f6470` | `ProjectSettings/ProjectVersion.txt` |
 | Product name | `To the Top` | `ProjectSettings/ProjectSettings.asset` |
-| Color space | Linear | `ProjectSettings/ProjectSettings.asset` / live PlayerSettings probe |
-| Render pipeline | Universal Render Pipeline | `ProjectSettings/GraphicsSettings.asset` |
-| URP package | `17.3.0` | `Packages/manifest.json` |
-| Active editor target | WebGL | live Unity Editor probe |
-| WebGL compression | Brotli | live Unity Editor probe / `ProjectSettings/ProjectSettings.asset` |
-| WebGL memory | 32 MB | live Unity Editor probe / `ProjectSettings/ProjectSettings.asset` |
-| WebGL threads | Disabled | live Unity Editor probe |
-| WebGL decompression fallback | Disabled | live Unity Editor probe |
-| WebGL exception support | Explicitly thrown exceptions only | live Unity Editor probe |
-| WebGL hashed filenames | Disabled | live Unity Editor probe / `ProjectSettings/ProjectSettings.asset` |
-| WebGL quality index | `0` (Mobile profile) | `ProjectSettings/QualitySettings.asset` |
-| Default web resolution | 960 x 600 | `ProjectSettings/ProjectSettings.asset` |
-| Build scenes | Only `Assets/Scenes/SampleScene.unity` is enabled | `ProjectSettings/EditorBuildSettings.asset` |
-| Working scene | `Assets/Scenes/Level4.unity` is the current implementation scene; `Level3.unity` remains the previous implementation/workbench, `Level2.unity` remains the earlier implementation/workbench, and `Level1.unity` remains the reference/workbench scene | Unity Editor scene state, verified 2026-09-06 |
-| Level 2 status | `Assets/Scenes/Level2.unity` is saved with Momentum Trapworks UI, hidden one-shot falling traps, and a 6-10m/s distance speed ramp; it is not yet enabled in Build Settings pending scene-order approval | Unity scene/script verification and `ProjectSettings/EditorBuildSettings.asset` |
-| Level 3 status | `Assets/Scenes/Level3.unity` is saved with Pulsebound Foundry UI, a 340m track, pulse plates, 3-second spike shuttles, swinging hammers, and pooled side cannons; it is not yet enabled in Build Settings pending scene-order approval | Unity scene/script verification and `ProjectSettings/EditorBuildSettings.asset` |
-| Level 4 status | `Assets/Scenes/Level4.unity` is saved with Vaultline Citadel UI, a 360m track, jump-state support, prefab-backed vault barriers/rising blocks/sweep beams/shutter blocks, and limited pooled side cannons; it is not yet enabled in Build Settings pending scene-order approval | `Assets/Scenes/Level4.unity`, `Assets/Scripts/PlayerController.cs`, `Assets/Scripts/JumpBarrierHazard.cs`, `Assets/Scripts/RisingBlockHazard.cs`, `Assets/Scripts/SweepBeamHazard.cs`, `Assets/Scripts/ShutterBlockHazard.cs`, verified 2026-09-06 |
-| Level 4 crowd/trap rule | Level 4 does not show prefab `Telegraph` children; barriers, rising blocks, sweep beams, and shutters resolve immediately from visual-runner overlap. Each destroyed visual clone removes the rounded whole-number average of `logicalCount / visibleCloneCount`, recalculating before each subsequent loss. The blue badge shows logical count; `VisualRunnerCount` remains bounded | `Assets/Scripts/PlayerCrowdManager.cs`, `Assets/Scripts/Level4HazardBase.cs`, and Level 4 hazard scripts; implementation pending Unity compile/playtest |
-| Input | Unity Input System; mouse drag and keyboard fallback are implemented | `Packages/manifest.json`, `Assets/InputSystem_Actions.inputactions`, `Assets/Scripts/PlayerController.cs` |
-| Assembly definitions | None found under `Assets/**/*.asmdef` | repository scan on baseline date |
+| Rendering | Linear color space; URP assigned | `ProjectSettings/ProjectSettings.asset`, `ProjectSettings/GraphicsSettings.asset` |
+| URP / Input System / Cinemachine | `17.3.0` / `1.19.0` / `3.1.6` | `Packages/manifest.json` |
+| Web reference resolution | 960 x 600 | `defaultScreenWidthWeb`, `defaultScreenHeightWeb` in PlayerSettings asset |
+| WebGL quality default | Index `0` | `ProjectSettings/QualitySettings.asset` |
+| WebGL memory | Initial 32 MB; maximum 2048 MB; serialized growth mode `2` | `webGLInitialMemorySize`, `webGLMaximumMemorySize`, `webGLMemoryGrowthMode` in PlayerSettings asset |
+| WebGL threads / decompression fallback / hashed filenames | Disabled | PlayerSettings asset |
+| WebGL compression / exceptions | Brotli / explicitly thrown exceptions only, as previously probed; serialized values remain `0` / `1` | PlayerSettings asset and earlier live probe |
+| Saved shared build scene list | Only `Assets/Scenes/SampleScene.unity` enabled | `ProjectSettings/EditorBuildSettings.asset` |
+| Level 5 legacy stopper layer | `PlayerOnly`, index `6`; retained for disabled compatibility children | `ProjectSettings/TagManager.asset`, `CrackedSpanHazard.cs` |
+| Gameplay assembly layout | No `.asmdef` found under `Assets` in this review | Asset file inventory |
 
-Important scene rule: `Level4` is the current implementation scene, `Level3` is the previous implementation/workbench, `Level2` is the earlier implementation/workbench, `Level1` is the gameplay/UI reference workbench, and only `SampleScene` is currently enabled in Build Settings. Do not assume editor playability means build inclusion. Before a WebGL milestone, explicitly choose the scene order and update Build Settings and this file together.
+32 MB is initial memory, not a measured peak or total runtime cap. The 2048 MB configured maximum is not a performance target or evidence that a device can sustain that usage. Actual browser memory and frame-time measurements remain TBD.
 
-## 3. Repository structure
+Level5 is the current implementation/workbench scene; Level4, Level3, and Level2 are earlier workbenches, and Level1 is the original gameplay/UI reference. The earlier live target was WebGL; query current editor state before platform operations.
 
-```text
-Assets/
-  Art/                         Project materials, meshes, and custom UI art
-  Editor/                      Editor-only builders and tooling
-  InputSystem_Actions.inputactions
-  Materials/                   Player and enemy materials
-  Models/                      Character and object models
-  Plugins/NuGet/               Third-party managed plugins/DLLs
-  Prefabs/                     Door, enemy, player, and UI prefabs
-  Resources/UI/                Runtime-loaded CounterBadge prefab
-  Scenes/
-    Level1.unity               Reference/workbench level: multiplier ramp-up/sawmill
-    Level2.unity               Implemented Spiral Trapworks level; 300m track and planned trap sections
-    Level3.unity               Implemented Pulsebound Foundry level; 340m track and timed pulse/spike/hammer/cannon sections
-    SampleScene.unity          Current enabled build scene; legacy/sample flow
-  Scripts/                     Gameplay, UI, effects, and pooling MonoBehaviours
-  UI/kenney_ui-pack/           Supplied UI pack, fonts, sprites, sounds, previews, license
-  _Recovery/                   Recovery scene snapshots; do not use as production content
+Build inclusion needs both saved and live verification: an earlier live probe returned `Level5.buildIndex = 1`, while the inspected shared build settings list only SampleScene. The reason for that discrepancy is TBD; inspect the active Build Profile and its scene list before claiming a production launch order. Do not overwrite the user's live configuration to match the document. Choose and document the intended production scene order before a WebGL milestone.
 
-Packages/                      Package manifest and lock file
-ProjectSettings/               Unity/player/quality/graphics/build settings
-.codex/AGENTS.md                Existing MCP workflow and detailed gameplay notes
-```
+## 4. Repository and ownership
 
-Current gameplay scripts are intentionally in one flat folder. Keep the existing files stable while the prototype is being proven. If the project grows, introduce folders by responsibility rather than moving files opportunistically:
-
-```text
-Assets/Scripts/
-  Bootstrap/       scene composition, run state, service wiring
-  Crowd/           player crowd, runner representation, formation, combat
-  Track/           gates, doors, finish, hazards, pickups, spawners
-  Economy/         currency, progression, shop data
-  UI/              HUD, menus, result screens, presentation adapters
-  Platform/        WebGL/browser integration and safe platform abstractions
-  Shared/          small reusable utilities and pooling
-```
-
-Do not create this future layout as a broad refactor until the next feature actually needs a boundary. Preserve Unity script GUIDs and scene references when moving files.
-
-## 4. Current scene and system map
-
-`Assets/Scenes/Level1.unity` remains the reference/workbench scene and contains the original authored areas:
-
-- `Level 1 - Multiplier Ramp-Up`: parent for `Systems`, `Track`, `Gates`, `Pickups`, `Lighting`, `Section 2 - The Sawmill Bottleneck`, and `FinishGate`.
-- `Player`: player controller, crowd manager, runner prefab/pool, world level label, and world-space count badge.
-- `Level 1 Camera`: main camera.
-- `CM Level1 Crowd Follow`: Cinemachine follow camera support.
-- `EventSystem`.
-- `Level HUD Canvas`: current HUD, progress bar, stage markers, currency, settings, shop, run labels, and finish screen.
-
-Responsibility map:
-
-- `PlayerController.cs`: `CharacterController` movement, forward speed, horizontal mouse/touch drag, keyboard fallback, jump, gravity, and game-state movement lock.
-- `PlayerCrowdManager.cs`: logical runner count, visual runner pool, Fermat spiral placement, compressed visual representation, edge-falling, combat participation, and game-over checks. Current safety limits include a pool cap of 500 and a visual clone cap tied to that limit.
-- `Gate.cs` and `Door.cs`: additive/multiplicative gate choices and one-time trigger behavior.
-- `Enemy.cs`, `EnemySpawner.cs`, `GroupSpawner.cs`: enemy state/movement, group placement, detection, and crowd combat.
-- `CircularSaw.cs`, `ConeHazard.cs`, `FallingHazard.cs`: track hazards.
-- `ObjectPool.cs`, `ProjectileLauncher.cs`, `TrackingProjectile.cs`: allocation-conscious projectile reuse.
-- `DeathPopEffect.cs`: runner-loss presentation effect.
-- `CurrencyWallet.cs`: run currency plus wallet currency, exposed through a singleton. `LevelHud` currently displays run currency.
-- `CountBadge.cs` and `Resources/UI/CounterBadge.prefab`: world-space player/enemy count badges. `PlayerCrowdManager.Start()` attaches the blue player badge using `ActiveRunnerCount`; `CountBadge` loads the visual prefab from `Resources`.
-- `LevelHud.cs`: current Level1 HUD currency/progress updates, settings/shop panels, sound toggle, pause state, restart, and menu exit.
-- `UIManager.cs`: older/global menu, HUD, game-over, win, progress, and Cinemachine fall-camera flow. It remains for compatibility with the sample/legacy flow.
-- `FinishGate.cs`: detects completion and currently builds a finish overlay dynamically.
-
-There are two UI flows (`LevelHud` and `UIManager`). Treat `LevelHud` as the owner of the current Level1 HUD. Do not add a third UI authority. When migrating the legacy flow, move behavior deliberately and remove duplicate ownership only after both scenes and build flow are verified.
-
-`Assets/Scenes/Level2.unity` reuses the verified Level1 systems/UI/camera setup and adds the authored `Trap Sections` hierarchy: `Cone Weave`, `Falling Tutorial`, `Gate Combination`, `Saw Relay`, `Crossfire`, and `Final Gauntlet`. Its current scene-level settings are a 300m track, `LEVEL 2 - MOMENTUM TRAPWORKS` HUD copy, hidden one-shot falling traps with 7m forward activation offsets, and a 6-10m/s player speed ramp from z=3 to z=297. Gate B/C currently use integer x2 multipliers because `Gate.value` is an integer; implementing the plan's x2.5 values requires an explicit gameplay-math change.
-
-Level 4 hazards have no visible activation indicator. They process visual-runner overlap immediately; they do not wait for a warning telegraph or remove an arbitrary percentage of the crowd.
-
-## 5. Development direction
-
-### Core loop
-
-1. Start with a clear, short forward-running level.
-2. Present an obvious left/right gate decision (`+N` or `xN`).
-3. Reward good choices with visible spiral crowd growth and currency.
-4. Telegraphed hazards test steering and crowd width.
-5. Enemy mobs create readable risk and controlled runner loss.
-6. Offer recovery or reward moments before the finish.
-7. Finish with a strong count/currency result and a clear next action.
-
-The improvement target is not simply more objects. Improve decision quality, crowd readability, feedback, pacing, balance, replayability, and browser performance.
-
-### Architecture direction
-
-Use thin MonoBehaviours at Unity boundaries and keep rules testable where practical:
-
-- Plain C# is preferred for deterministic math, gate evaluation, score calculation, and balancing rules.
-- ScriptableObjects are the preferred home for authored level, gate, hazard, crowd, economy, and presentation configuration as soon as values are shared across scenes or need balancing outside code.
-- Scene objects should own references to the systems they require. Avoid repeated global searches and new singletons.
-- Use events or explicit interfaces for cross-system notifications; do not let UI poll every gameplay detail or let hazards directly manipulate unrelated UI.
-- Keep `CurrencyWallet` and `UIManager` compatibility stable until a planned migration replaces their global access.
-- Avoid adding networking, online services, or server simulation to the single-player WebGL core unless the product scope explicitly changes.
-
-### Crowd quality bar
-
-- Keep logical count separate from visual count.
-- `PlayerCrowdManager.ActiveRunnerCount` is the logical count shown by the blue badge; `VisualRunnerCount` is the bounded active visual clone count. Recalculate the rounded logical-per-visual average before each visual clone is removed.
-- Retain the spiral formation and make its density, spacing, and compression readable at a glance.
-- Keep visual clones bounded; use pooling and predictable reuse.
-- Avoid per-runner expensive physics. Prefer aggregate checks, cached arrays, spatial partitioning, and deterministic crowd rules.
-- Gate and hazard math must be deterministic and testable without a scene when feasible.
-
-## 6. WebGL/browser rules
-
-WebGL is the release constraint, not a final port. New runtime code must be browser-safe:
-
-- Prefer the Input System with mouse, touch, and keyboard mappings. Do not require a native controller, filesystem, process, thread, or platform-specific API for the main loop.
-- Avoid gameplay-time `Instantiate`/`Destroy`, unbounded lists, LINQ in hot paths, per-frame string formatting, and repeated `Find*` calls. Pool high-frequency objects and cache references.
-- Keep renderers, materials, lights, shadows, particle counts, post-processing, and shader variants conservative for mobile browsers.
-- Keep assets small: reuse materials, atlas UI sprites where useful, compress textures appropriately, and avoid unnecessary animation/model variants.
-- Keep loading predictable. Do not add synchronous disk/network work, large `Resources` scans, or runtime-only dependencies without a measured reason. Plan to replace `Resources` with explicit references or Addressables only if the size/loading evidence justifies it.
-- Never enable WebGL threads, decompression fallback, or a larger memory heap just because a build fails. First identify the asset/code cause; change the setting with a documented measurement and browser compatibility check.
-- Validate the actual WebGL build in at least one Chromium-based browser and one lower-powered/mobile-like profile before calling a performance task complete.
-
-Initial performance budgets to track (targets, not yet measured):
-
-- stable 60 FPS on a desktop browser; graceful 30 FPS on a lower-powered browser profile;
-- no recurring gameplay GC spikes from crowd movement;
-- bounded active visual runners and pooled hazards/projectiles;
-- first playable interaction after the smallest practical download;
-- no console errors, missing assets, or input dead zones in the browser build.
-
-Record measured budgets in this file when profiling establishes them. Do not present targets as achieved results.
-
-## 7. Configuration ownership and change protocol
-
-Use the narrowest owner for every setting:
-
-| Setting type | Owner |
+| Location | Responsibility |
 |---|---|
-| Player speed, gate value, hazard timing, crowd limits | serialized component now; ScriptableObject when shared/balanced centrally |
-| Scene hierarchy and references | scene/prefab asset |
-| HUD visual styling | `Assets/Scenes/Level1.unity` plus supplied assets in `Assets/UI/` or `Assets/Art/UI/` |
-| Input actions | `Assets/InputSystem_Actions.inputactions` and the consuming controller |
-| Package/version choice | `Packages/manifest.json` and `Packages/packages-lock.json` |
-| Rendering/player/build/quality | `ProjectSettings/` files; change through Unity when possible |
-| Browser-specific behavior | `Assets/Scripts/Platform/` or a small explicit adapter, not scattered preprocessor branches |
+| `Assets/Scripts/` | Gameplay, crowd, UI, effects, and pooling; currently a flat folder |
+| `Assets/Editor/` | Editor-only scene builders and tooling, including Level 3–5 builders |
+| `Assets/Scenes/` | SampleScene and Level1–Level5 authored scenes |
+| `Assets/Prefabs/` | Player, enemy, door, UI, and reusable trap prefabs |
+| `Assets/Art/`, `Assets/Materials/`, `Assets/Models/` | Presentation assets and models |
+| `Assets/UI/kenney_ui-pack/` | Supplied UI sprites, fonts, sounds, previews, and license |
+| `Assets/Resources/UI/` | Runtime-loaded CounterBadge prefab |
+| `Assets/InputSystem_Actions.inputactions` | Authored input actions |
+| `Assets/Plugins/NuGet/` | Third-party managed plugins; check platform compatibility when touched |
+| `Assets/_Recovery/` | Recovery snapshots, not production content |
+| `Packages/` | Package manifest and lock file |
+| `ProjectSettings/` | Player, rendering, quality, physics layers, and shared build settings |
 
-When adding or changing a setting:
+Keep the flat gameplay layout stable until a feature needs a responsibility boundary. Potential future folders are Bootstrap, Crowd, Track, Economy, UI, Platform, and Shared; this is not authorization for a broad move. Preserve script GUIDs, asset `.meta` files, prefab links, and serialized references.
 
-1. Give it a descriptive name, a safe default, an owner, and a reason.
-2. Clamp designer-facing values with `OnValidate` when they can create frame spikes or huge scenes.
-3. Decide whether it is per-level, per-platform, or global before placing it.
-4. Update the relevant source asset and this `AGENTS.md` baseline if it changes a documented current value.
-5. Verify the narrowest useful path: compile, playtest, screenshot, profiler capture, or WebGL build.
-6. Note any unverified assumption as `TBD` instead of inventing a value.
+Use the narrowest owner: per-level values belong to serialized components or authored configuration; reusable shared balance data may warrant ScriptableObjects; object wiring belongs to scenes/prefabs; input belongs to actions and their controller; packages and platform settings belong to their source assets. Update builders when changes to generated content must survive regeneration.
 
-## 8. Milestones
+## 5. Systems and invariants
 
-- **M0 — Prototype truth:** choose the production start scene, reconcile `SampleScene`/`Level1` Build Settings, remove duplicate UI ambiguity, and keep the current loop playable.
-- **M1 — Data and balance:** move shared gate, hazard, crowd, level, and economy values into authored data; add focused tests for gate math and crowd-count rules.
-- **M2 — Crowd feel:** improve spiral readability, formation transitions, crowd compression, loss feedback, combat fairness, and recovery pacing.
-- **M3 — Content:** add original gate/hazard/enemy patterns with deliberate risk/reward pacing and reusable level sections.
-- **M4 — UI/presentation:** consolidate UI ownership, reuse the supplied `Assets/UI/kenney_ui-pack`, preserve responsive layout, and make all feedback readable on browser/mobile aspect ratios.
-- **M5 — WebGL hardening:** profile allocations/rendering/loading, confirm browser input, tune quality tiers, reduce payload, and run a clean WebGL build.
-- **M6 — Release readiness:** product naming/branding, licensing audit, build scene audit, browser matrix, save/economy audit, and final error-free playthrough.
+| System | Owner |
+|---|---|
+| CharacterController movement, steering, speed ramp, jump, gravity, movement locks | `PlayerController.cs` |
+| Logical crowd count, bounded visual pool, spiral placement, edge losses, combat, game-over checks | `PlayerCrowdManager.cs` |
+| One-shot additive/multiplicative gates | `Gate.cs`, `Door.cs` |
+| Enemy state, placement, group detection, and crowd combat | `Enemy.cs`, `EnemySpawner.cs`, `GroupSpawner.cs` |
+| Track hazards | Saw/cone/falling/pulse/spike/hammer scripts; Level 4 hazard family; `CrackedSpanHazard.cs` |
+| Reused projectiles | `ObjectPool.cs`, `ProjectileLauncher.cs`, `TrackingProjectile.cs` |
+| Runner-loss presentation | `DeathPopEffect.cs` |
+| Run and wallet currency | `CurrencyWallet.cs`, with pickup behavior in `DollarCoin.cs` |
+| World count badges | `CountBadge.cs`, `Resources/UI/CounterBadge.prefab` |
+| Authored level HUD, settings/shop, pause, restart, exit | `LevelHud.cs` |
+| Legacy menu/HUD/results and fall-camera compatibility | `UIManager.cs` |
+| Finish detection and dynamically built finish overlay | `FinishGate.cs` |
 
-## 9. Verification checklist
+### Crowd and movement
 
-Before merging a gameplay change:
+Keep logical count separate from visual count. `ActiveRunnerCount` is the logical count shown by the blue badge; `VisualRunnerCount` is the bounded active clone count. The previously documented pool safety cap is 500; inspect current serialized overrides and pool code before balancing or changing it.
 
-- Unity compiles with no new errors or warnings that affect the changed path.
-- The relevant scene opens and plays from a clean state.
-- Gate math, runner count, finish state, currency, pause state, and restart behavior are checked when touched.
-- New allocations are justified and bounded.
-- UI remains readable at the current 960x600 web reference and a narrow/mobile-like aspect ratio.
-- A WebGL build is tested when the change touches input, loading, assets, rendering, memory, packages, or platform APIs.
-- Scene, package, and ProjectSettings changes are intentional and included in the handoff.
+For visual-clone hazard losses, use the crowd manager's removal API and recalculate the rounded whole-number `logicalCount / visibleCloneCount` value before each removal. Do not directly mutate both counts independently. Preserve the spiral and pool reuse; avoid expensive physics on every clone.
 
-## 10. Keeping this file correct
+Do not freeze a positive logical crowd solely because a terminal flag remains latched. The current PlayerController guard checks both `IsGameOver` and an empty logical count; this is a local protection, not proof that every game-state consumer handles stale state. Check hazards, completion, restart, and UI together when changing that boundary.
 
-This document is not a substitute for the Unity assets or code. If it disagrees with the repository, verify the repository and update this file. Every new project-wide setting, architecture decision, platform constraint, or milestone completion should be added here with its source path and verification date. Keep statements labeled as current, target, or TBD so future agents can distinguish facts from direction.
+### UI and game state
 
-Error tracking rule: whenever an error is identified and fixed, append a concise entry to [ERROR_TRACKING.md](ERROR_TRACKING.md) summarizing the error, its verified or best-known cause, and the fix. Update the entry when later investigation changes the cause or fix. Do not present an unverified cause as fact; label it as TBD or suspected.
+Two UI flows currently coexist. `LevelHud` owns the authored level HUD; `UIManager` supports the legacy/sample flow. Preserve compatibility and do not add a third authority. Consolidation is planned work, not incidental cleanup.
 
-## 11. Implementation plan references
+Standalone levels use `LevelHud.Awake/OnDestroy` and `UIManager.SetExternalGameActive` to register activity when no legacy UIManager instance exists. Do not add a UIManager merely to activate a standalone level. Verify fresh start, pause/resume, loss, win, restart, and scene transitions when changing this bridge.
 
-The proposed Level 3 plan is:
+### Hazards
 
-- [LEVEL3_IMPLEMENTATION_PLAN.md](LEVEL3_IMPLEMENTATION_PLAN.md): Level 3 "Pulsebound Foundry" layout, new pulse/spike/hammer/cannon trap set, exact 3-second spike endpoint travel, difficulty progression, scene construction order, WebGL constraints, and playtesting gates.
+Hazards must be visually readable and respect reaction time, crowd width, and speed. Telegraph behavior is level-specific: Level 4 barriers, rising blocks, sweep beams, and shutters hide prefab `Telegraph` children and resolve visual-runner overlap immediately, with airborne-clearance protection. Do not reintroduce warnings or arbitrary percentage losses into that family without a design change.
 
-The proposed Level 4 plan is:
+Level 5 jump clarification: `CrackedSpanHazard` starts a bounded crossing session before each gap and evaluates the lead with the real `PlayerController` trajectory. `PlayerCrowdManager` then classifies non-lead visual runners by identity and actual world-space Z as near-side, over-gap, far-side, or failed; a successful lead crossing does not guarantee that trailing runners survive.
 
-- [LEVEL4_IMPLEMENTATION_PLAN.md](LEVEL4_IMPLEMENTATION_PLAN.md): Level 4 "Vaultline Citadel" layout, jump-over barriers and map blocks, reusable obstacle prefabs, new vertical trap combinations, difficulty progression, scene construction order, WebGL constraints, and playtesting gates.
+Level 5 fractures are a separate contract: the current implementation replaces the continuous road with solid segments at 0–304, 308–386, and 390–420, leaving real 4.0m gaps at z=304–308 and z=386–390. `CrackedSpanHazard` evaluates the lead at the center and far edge, then keeps processing the bounded crowd session after lead success. `PlayerCrowdManager` uses each runner's actual world-space Z, the shared lead vertical trajectory, the authored road surface, and far-edge clearance to latch SAFE_FAR_SIDE or FAILED; only FAILED runners enter the pooled gravity-fall path, preserving the rounded logical-per-visual removal contract. The crossing scan iterates its stable identity map so compression/reformation cannot invalidate the active-list traversal. Legacy `Bridge` and `LeadStopper` children remain disabled compatibility objects; they are not gameplay surfaces. The lead-fall terminal state stops forward movement while the crowd manager continues falling-runner cleanup. Exact full/partial balance under compressed representation still requires full route and browser testing.
 
-Before implementing any new level or major gameplay feature, read the relevant design plan and use it as the implementation boundary. The current Level 2 plan is:
+`ConeHazard` edge elimination must remain limited to the cone's local Z window; a cone must not kill distant off-edge runners elsewhere on the track.
 
-- [LEVEL2_IMPLEMENTATION_PLAN.md](LEVEL2_IMPLEMENTATION_PLAN.md): Level 2 “Spiral Trapworks” layout, coordinates, gate values, trap combinations, difficulty progression, scene construction order, WebGL constraints, and playtesting gates.
+## 6. Level plans and current content
 
-For Level 2 work, do not invent replacement coordinates or trap pacing without first updating the plan or documenting the approved design change. For future levels and features, create or update a linked Markdown plan before implementation when the work introduces new scene structure, gameplay pacing, coordinate layouts, settings, or platform constraints.
+Read the relevant plan before level implementation. Plans define design intent; saved assets and runtime checks establish what is implemented. Document deviations rather than silently replacing coordinates, gate math, or trap pacing.
 
-Every implementation request should be checked against:
+| Scene | Content summary | Design reference |
+|---|---|---|
+| Level1 | Original multiplier ramp-up/sawmill reference, authored HUD and camera setup | Existing scene and `Assets/Editor/Level1Section2Builder.cs` |
+| Level2 | 300m Momentum Trapworks; cone weave, hidden one-shot falling traps, saw relay, crossfire, final gauntlet; 6–10m/s ramp | [LEVEL2_IMPLEMENTATION_PLAN.md](LEVEL2_IMPLEMENTATION_PLAN.md) |
+| Level3 | 340m Pulsebound Foundry; pulse plates, three-second spike endpoint travel, swinging hammers, pooled side cannons | [LEVEL3_IMPLEMENTATION_PLAN.md](LEVEL3_IMPLEMENTATION_PLAN.md) |
+| Level4 | 360m Vaultline Citadel; jump barriers, rising blocks, sweep beams, shutters, limited pooled cannons | [LEVEL4_IMPLEMENTATION_PLAN.md](LEVEL4_IMPLEMENTATION_PLAN.md) |
+| Level5 | 420m Fracture Relay; recombined Level 2–4 hazards, two physical 4m road gaps with pooled split-crowd falls, 6–10m/s ramp | [LEVEL5_IMPLEMENTATION_PLAN.md](LEVEL5_IMPLEMENTATION_PLAN.md) |
+| SampleScene | Legacy/sample flow; only scene in saved shared build list | Existing scene and build settings |
 
-1. The applicable plan in this section.
-2. The verified baseline and ownership rules in this file.
-3. The WebGL/browser constraints in this file.
-4. The verification checklist before the change is considered complete.
+These summaries carry forward earlier implementation records; this documentation review is not a new full scene playthrough. On 2026-09-09, Level 5 received a clean compile/scene rebuild plus focused Play Mode probes for the physical gap, no-jump lead fall, pooled rear-runner fall, and lead-fall movement lock. Full clean playthrough, balance, browser performance, and release readiness remain unverified.
+
+Level 2 falling traps were authored with 7m forward activation offsets and a speed ramp from z=3 to z=297. Gate B/C use integer x2 values because `Gate.value` is an integer; the plan's x2.5 values require a deliberate gameplay-math change.
+
+Level 5 uses the Level4 systems/UI/camera setup and sections named Crosswind Pulse Weave, Drop-Saw Relay, Block-Saw Interlock, Pendulum Shutter Exchange, Fracture Tutorial, and Final Fracture Relay. Earlier authored coordinates place x2 gates at z=30/150/320 and cracked spans at z=304/386. Check the builder and saved scene before editing their layout.
+
+For new levels or features introducing scene structure, pacing, coordinates, or platform constraints, create or update a linked implementation plan before implementation. Preserve forward Z travel, readable left/right lanes, descriptive hierarchy names, clear start/camera/finish placement, and trigger-only gates unless a physical blocker is intentional.
+
+## 7. Implementation principles
+
+Build the loop around clear gate choices, visible spiral growth, readable hazards, fair enemy encounters, recovery moments, and a useful finish reward. Improve decision quality and feedback before adding object count.
+
+Use thin MonoBehaviours at Unity boundaries and deterministic plain C# for math and rules where practical. Add ScriptableObjects when shared configuration or authoring needs justify them. Keep references explicit and cached; avoid new singletons and repeated global searches. Prefer events or small interfaces at real system boundaries over hazards manipulating unrelated UI.
+
+Keep designer values descriptive and safely clamped. Use `OnValidate` for safe validation; avoid operations that trigger unsafe lifecycle callbacks. Do not expand networking, online services, or server simulation into the single-player core without a scope change.
+
+Reuse existing art and the supplied UI pack. Keep count badges legible, function colors distinct, and UI readable at 960x600 and narrow/mobile-like layouts. Follow existing architecture for local fixes; propose migrations explicitly when required.
+
+## 8. WebGL requirements and performance targets
+
+Runtime features must support browser-safe input and APIs. Prefer the Input System with mouse/touch and keyboard support. Do not require native filesystem/process/thread APIs for gameplay.
+
+Bound visual clones, projectiles, effects, collections, and work per frame. Pool frequent objects and avoid recurring gameplay allocations, LINQ in hot loops, per-frame string formatting, repeated searches, and frequent Instantiate/Destroy. One-time UI construction is an existing behavior, not permission to allocate per frame.
+
+Reuse materials, constrain shadows/lights/particles, keep shader variants and textures small, and justify new dependencies. Avoid broad Resources scans and synchronous loading stalls. Move from Resources to explicit references or Addressables only when loading/size evidence warrants it.
+
+Do not increase memory settings, enable threads, or enable decompression fallback as an unexplained response to build failure. Identify the cause and document measurements and compatibility before changing platform settings.
+
+Targets, not achieved measurements:
+
+- Stable 60 FPS on desktop browsers and graceful 30 FPS on a lower-powered/mobile-like profile.
+- No recurring crowd-movement GC spikes; bounded active visual objects and pooled hazards.
+- Small first-playable download and predictable startup.
+- No browser errors, missing assets, or input dead zones.
+
+Record device/browser, build/profile, scene, crowd size, frame timing, allocations, memory, and loading measurements when available. A performance milestone requires an actual WebGL build tested in a Chromium-based browser and a lower-powered/mobile-like profile.
+
+## 9. Unity workflow and verification
+
+Inspect relevant assets, objects, components, scene dirtiness, and current editor state before mutation. Use available Unity MCP tools for scene/prefab work and Unity serialization for references. Discover exact object paths instead of guessing names. Preserve unsaved work; persist authorized scene edits deliberately and do not save incidental Play Mode changes.
+
+Audit-only rule: when the user asks for a code audit, review, or inspection, use source/repository inspection and non-mutating checks only. Do not use Unity MCP tools to enter, control, or simulate Play Mode, alter scene state, or drive editor gameplay unless the user explicitly requests Play Mode control or a gameplay run. Read-only asset/scene inspection and compiler/log diagnostics remain allowed when they are within scope. If runtime evidence would help an audit, report it as a separate optional verification step and wait for explicit authorization.
+
+After external asset/script edits, refresh Unity and inspect actual compilation results. A successful AssetDatabase refresh or an empty recent log window does not by itself prove that compilation ran, old warnings disappeared, or gameplay is correct. Separate project compiler/runtime failures from MCP connection errors and failed diagnostic snippets; use timestamps and stack traces to establish relevance.
+
+Choose checks proportional to the changed behavior:
+
+- Code: compiler feedback and focused rule/regression checks for the affected path.
+- Gameplay: fresh start and relevant gate math, logical/visual losses, jumping, finish, currency, pause, restart, and transition behavior.
+- Scene/UI: missing references, colliders, hierarchy, saved values, and scene/game screenshots at reference and narrow layouts.
+- Platform-sensitive input, loading, assets, rendering, memory, packages, or APIs: an actual WebGL build and browser checks; report explicitly when unavailable.
+
+Run existing meaningful tests where available. The earlier unfiltered EditMode invocation found no tests; do not report that as a passing suite. Do not create trivial tests merely to decorate a low-impact edit. Report scope honestly: source inspection, compilation, focused smoke test, full playthrough, and browser validation are different levels of evidence.
+
+When an error is identified and fixed, append a concise entry to [ERROR_TRACKING.md](ERROR_TRACKING.md) with the symptom, verified or suspected cause, fix, and verification. Update it if later evidence changes the diagnosis. Record pending issues as pending; do not present hypotheses or untested fixes as established facts.
+
+## 10. Milestones and document maintenance
+
+| Milestone | Completion boundary |
+|---|---|
+| M0 — Prototype truth | Choose production start/order, reconcile shared/profile/live build configuration, clarify UI ownership, and verify the playable loop |
+| M1 — Data and balance | Shared authored configuration and focused gate/crowd-count validation |
+| M2 — Crowd feel | Readable formation changes, fair losses/combat, recovery pacing, and measured crowd costs |
+| M3 — Content | Original reusable sections, deliberate risk/reward, and verified level pacing |
+| M4 — UI/presentation | Deliberate UI consolidation and responsive readable feedback |
+| M5 — WebGL hardening | Browser input, allocations/rendering/loading measurements, payload tuning, and a tested build |
+| M6 — Release readiness | Naming/licensing, build order, browser matrix, save/economy audit, and error-free playthrough |
+
+These are completion criteria, not claims that milestones have been achieved. Content existing in a workbench does not establish build inclusion or release readiness.
+
+Keep durable constraints and ownership here; keep detailed coordinates/specifications in linked plans and defect history in ERROR_TRACKING.md. Update this guide when a documented value, boundary, platform constraint, user routing preference, or milestone status changes. Include source paths, verification dates, and explicit TBDs. Avoid duplicating live state as timeless fact.

@@ -9,7 +9,22 @@ public class UIManager : MonoBehaviour
 {
     public static UIManager Instance { get; private set; }
 
-    public static bool IsGameActive { get; private set; }
+    private static bool gameActive;
+    private static bool externalGameActive;
+
+    public static bool IsGameActive
+    {
+        get => Instance == null ? externalGameActive : gameActive;
+        private set => gameActive = value;
+    }
+
+    public static void SetExternalGameActive(bool active)
+    {
+        if (Instance == null)
+        {
+            externalGameActive = active;
+        }
+    }
 
     [Header("UI Panels")]
     [SerializeField] private GameObject mainMenuPanel;
@@ -47,6 +62,7 @@ public class UIManager : MonoBehaviour
         }
 
         IsGameActive = false;
+        externalGameActive = false;
     }
 
     private void Start()
