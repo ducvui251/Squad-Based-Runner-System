@@ -17,6 +17,8 @@ public class SpikeSweepHazard : MonoBehaviour
     [SerializeField, Min(0f)] private float endpointPause = 0.75f;
     [SerializeField, Min(0f)] private float phaseOffset;
     [SerializeField, Min(0f)] private float approachDistance = 24f;
+    [Tooltip("Optional world-space Z after which this shuttle stops evaluating crowd hits.")]
+    [SerializeField] private float hitCheckEndZ = -1f;
 
     [Header("Collision")]
     [SerializeField, Min(0.05f)] private float killRadius = 0.65f;
@@ -44,6 +46,7 @@ public class SpikeSweepHazard : MonoBehaviour
         travelDuration = Mathf.Max(0.1f, travelDuration);
         endpointPause = Mathf.Clamp(endpointPause, 0f, 3f);
         approachDistance = Mathf.Clamp(approachDistance, 1f, 50f);
+        hitCheckEndZ = Mathf.Max(-1f, hitCheckEndZ);
         killRadius = Mathf.Clamp(killRadius, 0.05f, 1.5f);
         runnerCollisionPadding = Mathf.Clamp(runnerCollisionPadding, 0f, 0.75f);
         verticalHitRange = Mathf.Clamp(verticalHitRange, 0.1f, 2f);
@@ -70,6 +73,11 @@ public class SpikeSweepHazard : MonoBehaviour
         {
             cachedCrowdManager = FindFirstObjectByType<PlayerCrowdManager>();
             if (cachedCrowdManager == null) return;
+        }
+
+        if (hitCheckEndZ > 0f && cachedCrowdManager.transform.position.z >= hitCheckEndZ)
+        {
+            return;
         }
 
         if (motionPhase == MotionPhase.Dormant)

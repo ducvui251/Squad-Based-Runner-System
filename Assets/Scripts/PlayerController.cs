@@ -18,6 +18,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float gravity = -20f;
     [SerializeField] private float coyoteTime = 0.15f;
     [SerializeField] private float jumpBufferTime = 0.1f;
+    [SerializeField, Range(0.05f, 1f)] private float jumpReleaseVelocityMultiplier = 0.35f;
 
     // Public properties to sync physics with PlayerCrowdManager
     public float ForwardSpeed => GetForwardSpeed();
@@ -25,6 +26,7 @@ public class PlayerController : MonoBehaviour
     public float JumpForce => jumpForce;
     public bool IsGrounded => controller != null && controller.isGrounded;
     public bool IsAirborne => controller != null && !controller.isGrounded;
+    public float VerticalVelocity => velocity.y;
     public float HeightAboveGround => Mathf.Max(0f, transform.position.y);
 
     public bool HasCleared(float obstacleHeight, float margin)
@@ -37,6 +39,7 @@ public class PlayerController : MonoBehaviour
     private Vector3 velocity;
     private float coyoteTimer;
     private float jumpBufferTimer;
+    private bool jumpCutApplied;
 
     // Input System references
     private Mouse mouse;
@@ -74,7 +77,11 @@ public class PlayerController : MonoBehaviour
     private void HandleMovement()
     {
         // Stop movement if game is not active OR if game over has been triggered (slow-mo phase)
-        bool gameOverTriggered = crowdManager != null && crowdManager.IsGameOver;
+        // A stale terminal flag must not freeze a crowd that has since been
+        // replenished by a gate or scene-level recovery flow.
+        bool gameOverTriggered = crowdManager != null &&
+            (crowdManager.IsLeadFallGameOver ||
+            (crowdManager.IsGameOver && crowdManager.ActiveRunnerCount <= 0));
 
         if (!UIManager.IsGameActive || gameOverTriggered)
         {
@@ -174,6 +181,21 @@ public class PlayerController : MonoBehaviour
             velocity.y = jumpForce;
             coyoteTimer = 0f;
             jumpBufferTimer = 0f;
+            jumpCutApplied = false;
+        }
+
+        // Releasing jump early cuts the upward velocity. Holding Space preserves
+        // the full arc needed to clear the physical Level 5 road gap.
+        bool jumpHeld = (keyboard != null && keyboard.spaceKey.isPressed) ||
+            (touchscreen != null && touchscreen.primaryTouch.press.isPressed);
+        if (controller.isGrounded)
+        {
+            jumpCutApplied = false;
+        }
+        else if (!jumpHeld && !jumpCutApplied && velocity.y > 0f)
+        {
+            velocity.y *= jumpReleaseVelocityMultiplier;
+            jumpCutApplied = true;
         }
     }
 

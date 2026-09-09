@@ -16,6 +16,10 @@ public class PlayerCrowdManager : MonoBehaviour
     [SerializeField, Min(1)] private int maxVisualClones = 100;
     [SerializeField, Range(0.4f, 1f)] private float maxCompressionSpacingMultiplier = 0.7f;
 
+    [Header("Jump Wave Presentation")]
+    [SerializeField, Min(0f)] private float jumpWaveMaxDelay = 0.22f;
+    [SerializeField, Range(0f, 1f)] private float jumpWaveBlend = 1f;
+
     private List<GameObject> runnerPool = new List<GameObject>();
     private List<GameObject> activeRunners = new List<GameObject>();
     private List<GameObject> fallingRunners = new List<GameObject>();
@@ -28,6 +32,8 @@ public class PlayerCrowdManager : MonoBehaviour
     private float leftLimit = -2.5f;                              // Dynamic track left boundary
     private float rightLimit = 2.5f;                             // Dynamic track right boundary
     private CharacterController playerCc;                         // Cached CharacterController reference
+    private PlayerController playerController;                    // Cached lead movement authority
+    private bool hasDetectedTrackWidth;                            // Preserve the last valid road width across physical gaps
     private float trackDetectTimer = 0f;                          // Cooldown timer for DetectTrackWidth
     private const float TRACK_DETECT_INTERVAL = 0.25f;            // Only detect track width every 0.25 seconds
     private const int EDGE_CONFIRM_FRAMES = 3;                    // Clone must be off-edge for this many consecutive frames before falling
@@ -36,11 +42,48 @@ public class PlayerCrowdManager : MonoBehaviour
     private const int MAX_SAFE_POOL_SIZE = 500;
     private const int MAX_SAFE_VISUAL_CLONES = MAX_SAFE_POOL_SIZE;
 
+    private enum RoadGapRunnerState
+    {
+        SafeNearSide,
+        OverGap,
+        SafeFarSide,
+        Failed
+    }
+
+    private sealed class RoadGapRunnerRecord
+    {
+        public RoadGapRunnerState state;
+        public Vector3 previousPosition;
+    }
+
+    // One bounded session is enough because Level 5 fractures are sequential. The
+    // runner keys preserve identity when the remaining spiral repacks after a loss.
+    private readonly Dictionary<GameObject, RoadGapRunnerRecord> roadGapRunnerRecords =
+        new Dictionary<GameObject, RoadGapRunnerRecord>(MAX_SAFE_VISUAL_CLONES);
+    private GameObject roadGapLead;
+    private int roadGapSessionId;
+    private int roadGapParticipantCount;
+    private int roadGapResolvedCount;
+    private bool roadGapActive;
+    private bool roadGapComplete;
+
+    // A bounded history of the one authoritative player trajectory lets visual
+    // runners display a delayed front-to-back jump wave without giving any runner
+    // its own velocity, gravity, collider, or jump state.
+    private const int JUMP_WAVE_SAMPLE_CAPACITY = 64;
+    private readonly float[] jumpWaveSampleTimes = new float[JUMP_WAVE_SAMPLE_CAPACITY];
+    private readonly float[] jumpWaveSampleHeights = new float[JUMP_WAVE_SAMPLE_CAPACITY];
+    private int jumpWaveSampleHead = -1;
+    private int jumpWaveSampleCount;
+    private float jumpWaveBaseY;
+    private bool jumpWaveActive;
+
     private bool isFighting = false;
     private float enemyTargetX = 0f;
     private float currentSpacingFactor = 0.75f;
     private Collider[] overlapResults = new Collider[32];
     private bool hasTriggeredGameOver = false;
+    private bool hasTriggeredLeadFallGameOver = false;
     private float gameActiveTimer = 0f;                        // Time elapsed since game became active
     private const float GAME_OVER_GRACE_PERIOD = 1.5f;        // Seconds after game starts before game over can trigger
     private float lastGroundedY = 0f;                          // Tracks the last Y coordinate where the player was grounded
@@ -48,6 +91,7 @@ public class PlayerCrowdManager : MonoBehaviour
     public bool IsFighting => isFighting;
     public float EnemyTargetX => enemyTargetX;
     public bool IsGameOver => hasTriggeredGameOver;
+    public bool IsLeadFallGameOver => hasTriggeredLeadFallGameOver;
     public List<GameObject> ActiveRunners => activeRunners;
     public int LogicalRunnerCount { get; private set; }
     public int VisualRunnerCount => activeRunners.Count;
@@ -64,15 +108,20 @@ public class PlayerCrowdManager : MonoBehaviour
             int.MaxValue);
         maxVisualClones = Mathf.Clamp(maxVisualClones, oneToOneLimit, MAX_SAFE_VISUAL_CLONES);
         poolSize = Mathf.Clamp(Mathf.Max(poolSize, maxVisualClones), 1, MAX_SAFE_POOL_SIZE);
+        jumpWaveMaxDelay = Mathf.Clamp(jumpWaveMaxDelay, 0f, 0.5f);
+        jumpWaveBlend = Mathf.Clamp01(jumpWaveBlend);
     }
 
     private void Start()
     {
         OnValidate();
         hasTriggeredGameOver = false;
+        hasTriggeredLeadFallGameOver = false;
         gameActiveTimer = 0f;
         playerCc = GetComponent<CharacterController>();
+        playerController = GetComponent<PlayerController>();
         lastGroundedY = transform.position.y;
+        ResetJumpWave();
 
         if (!ValidateRunnerPrefab())
         {
@@ -139,12 +188,17 @@ public class PlayerCrowdManager : MonoBehaviour
                     {
                         leftLimit = bounds.min.x + 0.4f;
                         rightLimit = bounds.max.x - 0.4f;
+                        hasDetectedTrackWidth = true;
                         return;
                     }
                 }
             }
         }
         
+        // A physical road gap has no collider below the player. Keep the last
+        // valid width instead of replacing it with player-relative fallback bounds.
+        if (hasDetectedTrackWidth) return;
+
         // Fallback to checking left and right boundaries with a wider raycast (50 units)
         if (Physics.Raycast(transform.position + Vector3.up * 0.5f, Vector3.left, out hit, 50f))
         {
@@ -288,11 +342,11 @@ public class PlayerCrowdManager : MonoBehaviour
             if (transform.position.y < lastGroundedY - 10f)
             {
                 hasTriggeredGameOver = true;
+                hasTriggeredLeadFallGameOver = true;
                 if (UIManager.Instance != null)
                 {
                     UIManager.Instance.TriggerLeadFallGameOver(activeRunners.Count > 0 ? activeRunners[0].transform : transform);
                 }
-                return;
             }
 
             // Check 2: All logical runners have been lost
@@ -326,9 +380,46 @@ public class PlayerCrowdManager : MonoBehaviour
         float targetSpacing = isFighting ? 0.35f : spacingFactor;
         currentSpacingFactor = Mathf.Lerp(currentSpacingFactor, targetSpacing, Time.deltaTime * 5f);
 
+        UpdateJumpWaveHistory();
         RearrangeCrowd();
         HandleFallingRunners();
         UpdateLeadPlayerAnimation();
+    }
+
+    private void ResetJumpWave()
+    {
+        jumpWaveSampleHead = -1;
+        jumpWaveSampleCount = 0;
+        jumpWaveBaseY = transform.position.y;
+        jumpWaveActive = false;
+    }
+
+    private void UpdateJumpWaveHistory()
+    {
+        bool isAirborne = playerController != null
+            ? playerController.IsAirborne
+            : playerCc != null && !playerCc.isGrounded;
+        float currentY = transform.position.y;
+
+        if (!isAirborne)
+        {
+            jumpWaveBaseY = currentY;
+            jumpWaveActive = false;
+            return;
+        }
+
+        if (!jumpWaveActive)
+        {
+            jumpWaveBaseY = currentY;
+            jumpWaveSampleHead = -1;
+            jumpWaveSampleCount = 0;
+            jumpWaveActive = true;
+        }
+
+        jumpWaveSampleHead = (jumpWaveSampleHead + 1) % JUMP_WAVE_SAMPLE_CAPACITY;
+        jumpWaveSampleTimes[jumpWaveSampleHead] = Time.time;
+        jumpWaveSampleHeights[jumpWaveSampleHead] = Mathf.Max(0f, currentY - jumpWaveBaseY);
+        jumpWaveSampleCount = Mathf.Min(jumpWaveSampleCount + 1, JUMP_WAVE_SAMPLE_CAPACITY);
     }
 
     private void ScanForEnemies()
@@ -454,7 +545,7 @@ public class PlayerCrowdManager : MonoBehaviour
 
     private void HandleFallingRunners()
     {
-        PlayerController pc = GetComponent<PlayerController>();
+        PlayerController pc = playerController;
         float forwardSpeed = pc != null ? pc.ForwardSpeed : 6f;
         float gravity = pc != null ? pc.Gravity : -20f;
 
@@ -489,6 +580,241 @@ public class PlayerCrowdManager : MonoBehaviour
                 fallingRunners.RemoveAt(i);
             }
         }
+    }
+
+    /// <summary>
+    /// Starts a bounded crossing session for one physical fracture. The lead visual
+    /// is remembered by identity and excluded because the CharacterController owns
+    /// the lead's real crossing; non-lead clones are classified independently.
+    /// </summary>
+    public void BeginRoadGap(int sessionId, float gapStartZ, float gapEndZ)
+    {
+        roadGapRunnerRecords.Clear();
+        roadGapSessionId = sessionId;
+        roadGapLead = activeRunners.Count > 0 ? activeRunners[0] : null;
+        roadGapParticipantCount = 0;
+        roadGapResolvedCount = 0;
+        roadGapActive = true;
+        roadGapComplete = false;
+
+        for (int i = 1; i < activeRunners.Count; i++)
+        {
+            GameObject runner = activeRunners[i];
+            if (runner == null) continue;
+
+            roadGapRunnerRecords.Add(
+                runner,
+                new RoadGapRunnerRecord
+                {
+                    state = RoadGapRunnerState.SafeNearSide,
+                    previousPosition = runner.transform.position
+                });
+            roadGapParticipantCount++;
+        }
+
+        roadGapComplete = roadGapParticipantCount == 0;
+    }
+
+    public bool IsRoadGapComplete(int sessionId)
+    {
+        return roadGapActive && roadGapSessionId == sessionId && roadGapComplete;
+    }
+
+    public void EndRoadGap(int sessionId)
+    {
+        if (!roadGapActive || roadGapSessionId != sessionId) return;
+        ClearRoadGapSession();
+    }
+
+    public void CancelRoadGap(int sessionId)
+    {
+        EndRoadGap(sessionId);
+    }
+
+    /// <summary>
+    /// Evaluates actual world-space runner positions during the shared lead jump.
+    /// Vertical reach is predicted from the lead's current CharacterController
+    /// trajectory; only runners that enter the gap and cannot clear its far lip are
+    /// transferred once to the existing pooled falling-runner path.
+    /// </summary>
+    public int ProcessRoadGap(
+        int sessionId,
+        float gapStartZ,
+        float gapEndZ,
+        float roadSurfaceY,
+        float farEdgeClearance,
+        float landingTolerance)
+    {
+        if (!roadGapActive || roadGapSessionId != sessionId || roadGapComplete || LogicalRunnerCount <= 0)
+        {
+            return 0;
+        }
+
+        float startZ = Mathf.Min(gapStartZ, gapEndZ);
+        float endZ = Mathf.Max(gapStartZ, gapEndZ);
+        float surfaceY = roadSurfaceY;
+        float clearance = Mathf.Max(0f, farEdgeClearance);
+        float tolerance = Mathf.Max(0f, landingTolerance);
+        float forwardSpeed = playerController != null ? playerController.ForwardSpeed : 6f;
+        float verticalVelocity = playerController != null ? playerController.VerticalVelocity : -2f;
+        float gravity = playerController != null ? playerController.Gravity : -20f;
+        forwardSpeed = Mathf.Max(0.1f, forwardSpeed);
+
+        int fallenCount = 0;
+        // Iterate the stable session identity map instead of activeRunners. A failed
+        // visual can reduce the desired compressed visual count, and that cleanup
+        // may remove another visual from activeRunners while this scan is running.
+        // The session map is never structurally modified during the scan.
+        foreach (KeyValuePair<GameObject, RoadGapRunnerRecord> entry in roadGapRunnerRecords)
+        {
+            GameObject runner = entry.Key;
+            RoadGapRunnerRecord record = entry.Value;
+            if (runner == null || runner == roadGapLead) continue;
+            if (IsTerminalRoadGapState(record.state)) continue;
+
+            Vector3 previousPosition = record.previousPosition;
+            Vector3 currentPosition = runner.transform.position;
+            record.previousPosition = currentPosition;
+
+            if (record.state == RoadGapRunnerState.SafeNearSide)
+            {
+                if (currentPosition.z < startZ) continue;
+                record.state = RoadGapRunnerState.OverGap;
+            }
+
+            if (currentPosition.z < endZ)
+            {
+                bool canReachFarEdge = PredictFarEdgeHeight(
+                    currentPosition,
+                    endZ,
+                    surfaceY,
+                    clearance,
+                    forwardSpeed,
+                    verticalVelocity,
+                    gravity);
+
+                bool belowRoad = currentPosition.y < surfaceY - tolerance;
+                if (!canReachFarEdge || belowRoad)
+                {
+                    if (MarkRoadGapState(record, RoadGapRunnerState.Failed))
+                    {
+                        MakeRunnerFall(runner);
+                        fallenCount++;
+                    }
+                }
+
+                continue;
+            }
+
+            float farEdgeY = GetCrossingHeight(previousPosition, currentPosition, endZ);
+            bool crossedWithClearance = farEdgeY >= surfaceY + clearance;
+            bool landedBeyondLip = currentPosition.z >= endZ + 0.25f &&
+                currentPosition.y >= surfaceY - tolerance &&
+                verticalVelocity <= 0f;
+
+            if (crossedWithClearance || landedBeyondLip)
+            {
+                MarkRoadGapState(record, RoadGapRunnerState.SafeFarSide);
+            }
+            else if (MarkRoadGapState(record, RoadGapRunnerState.Failed))
+            {
+                MakeRunnerFall(runner);
+                fallenCount++;
+            }
+        }
+
+        roadGapComplete = roadGapResolvedCount >= roadGapParticipantCount;
+        return fallenCount;
+    }
+
+    /// <summary>
+    /// Compatibility overload for focused callers that only provide gap bounds.
+    /// Level 5 uses the session-aware overload above.
+    /// </summary>
+    public int ProcessRoadGap(float gapStartZ, float gapEndZ)
+    {
+        const int compatibilitySessionId = 0;
+        if (!roadGapActive || roadGapSessionId != compatibilitySessionId)
+        {
+            BeginRoadGap(compatibilitySessionId, gapStartZ, gapEndZ);
+        }
+
+        return ProcessRoadGap(
+            compatibilitySessionId,
+            gapStartZ,
+            gapEndZ,
+            lastGroundedY,
+            0.15f,
+            0.05f);
+    }
+
+    private bool PredictFarEdgeHeight(
+        Vector3 currentPosition,
+        float farEdgeZ,
+        float roadSurfaceY,
+        float farEdgeClearance,
+        float forwardSpeed,
+        float verticalVelocity,
+        float gravity)
+    {
+        float distanceToFarEdge = Mathf.Max(0f, farEdgeZ - currentPosition.z);
+        float timeToFarEdge = distanceToFarEdge / forwardSpeed;
+        float predictedHeight = currentPosition.y +
+            verticalVelocity * timeToFarEdge +
+            0.5f * gravity * timeToFarEdge * timeToFarEdge;
+        return predictedHeight >= roadSurfaceY + farEdgeClearance;
+    }
+
+    private static float GetCrossingHeight(Vector3 previousPosition, Vector3 currentPosition, float crossingZ)
+    {
+        float forwardDelta = currentPosition.z - previousPosition.z;
+        if (previousPosition.z >= crossingZ || forwardDelta <= 0.0001f)
+        {
+            return currentPosition.y;
+        }
+
+        float t = Mathf.Clamp01((crossingZ - previousPosition.z) / forwardDelta);
+        return Mathf.Lerp(previousPosition.y, currentPosition.y, t);
+    }
+
+    private static bool IsTerminalRoadGapState(RoadGapRunnerState state)
+    {
+        return state == RoadGapRunnerState.SafeFarSide || state == RoadGapRunnerState.Failed;
+    }
+
+    private bool MarkRoadGapState(RoadGapRunnerRecord record, RoadGapRunnerState newState)
+    {
+        if (record == null || IsTerminalRoadGapState(record.state)) return false;
+
+        record.state = newState;
+        roadGapResolvedCount++;
+        if (roadGapResolvedCount >= roadGapParticipantCount)
+        {
+            roadGapComplete = true;
+        }
+
+        return true;
+    }
+
+    private void MarkRoadGapRunnerRemoved(GameObject runner)
+    {
+        if (!roadGapActive || runner == null) return;
+
+        RoadGapRunnerRecord record;
+        if (roadGapRunnerRecords.TryGetValue(runner, out record))
+        {
+            MarkRoadGapState(record, RoadGapRunnerState.Failed);
+        }
+    }
+
+    private void ClearRoadGapSession()
+    {
+        roadGapRunnerRecords.Clear();
+        roadGapLead = null;
+        roadGapParticipantCount = 0;
+        roadGapResolvedCount = 0;
+        roadGapActive = false;
+        roadGapComplete = false;
     }
 
     public void AddLogicalRunners(int amount)
@@ -744,6 +1070,7 @@ public class PlayerCrowdManager : MonoBehaviour
     {
         if (runner == null) return;
 
+        MarkRoadGapRunnerRemoved(runner);
         activeRunners.Remove(runner);
         runnerSpawnTimes.Remove(runner);
         fallingRunnerVelocities.Remove(runner);
@@ -811,6 +1138,7 @@ public class PlayerCrowdManager : MonoBehaviour
     private void MakeRunnerFall(GameObject runner)
     {
         int logicalLoss = GetLogicalLossForVisualRunner();
+        MarkRoadGapRunnerRemoved(runner);
         activeRunners.Remove(runner);
         runnerSpawnTimes.Remove(runner);
         edgeFrameCounters.Remove(runner);

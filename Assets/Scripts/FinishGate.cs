@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -5,6 +6,13 @@ using UnityEngine.UI;
 [RequireComponent(typeof(BoxCollider))]
 public class FinishGate : MonoBehaviour
 {
+    [Header("Finish UI")]
+    [SerializeField] private Sprite panelSprite;
+    [SerializeField] private Sprite bannerSprite;
+    [SerializeField] private Sprite rewardPanelSprite;
+    [SerializeField] private Sprite primaryButtonSprite;
+    [SerializeField] private Sprite coinSprite;
+
     private bool hasFinished;
     private GameObject overlay;
     private PlayerCrowdManager crowd;
@@ -36,9 +44,10 @@ public class FinishGate : MonoBehaviour
 
     private void Update()
     {
-        if (hasFinished) return;
-
-        if (crowd == null) return;
+        if (hasFinished || crowd == null)
+        {
+            return;
+        }
 
         if (crowd.transform.position.z >= transform.position.z)
         {
@@ -50,7 +59,10 @@ public class FinishGate : MonoBehaviour
     private void ShowFinish()
     {
         Time.timeScale = 0f;
-        if (overlay != null) return;
+        if (overlay != null)
+        {
+            return;
+        }
 
         Canvas canvas = FindCanvas();
         overlay = BuildOverlay(canvas);
@@ -60,18 +72,28 @@ public class FinishGate : MonoBehaviour
     {
         GameObject hud = GameObject.Find("Level HUD Canvas");
         Canvas canvas = hud != null ? hud.GetComponent<Canvas>() : null;
-        if (canvas != null) return canvas;
+        if (canvas != null)
+        {
+            return canvas;
+        }
 
         canvas = FindFirstObjectByType<Canvas>();
-        if (canvas != null) return canvas;
+        if (canvas != null)
+        {
+            return canvas;
+        }
 
-        GameObject canvasGo = new GameObject("Finish Canvas",
-            typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+        GameObject canvasGo = new GameObject(
+            "Finish Canvas",
+            typeof(RectTransform),
+            typeof(Canvas),
+            typeof(CanvasScaler),
+            typeof(GraphicRaycaster));
         canvas = canvasGo.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         CanvasScaler scaler = canvasGo.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1080f, 1920f);
+        scaler.referenceResolution = new Vector2(960f, 600f);
         return canvas;
     }
 
@@ -84,52 +106,102 @@ public class FinishGate : MonoBehaviour
         rootRect.anchorMax = Vector2.one;
         rootRect.offsetMin = Vector2.zero;
         rootRect.offsetMax = Vector2.zero;
-        root.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.78f);
 
-        string sceneName = SceneManager.GetActiveScene().name;
-        if (sceneName == "Level2")
-        {
-            Text levelTitle = CreateText(root.transform, "LEVEL 2 COMPLETE", 52,
-                Color.white, TextAnchor.MiddleCenter);
-            SetRect(levelTitle.rectTransform, 0f, 245f, 760f, 72f, new Vector2(0.5f, 0.5f));
+        Image dim = root.GetComponent<Image>();
+        dim.color = new Color(0.008f, 0.025f, 0.055f, 0.84f);
 
-            Text levelName = CreateText(root.transform, "MOMENTUM TRAPWORKS", 28,
-                new Color(1f, 0.84f, 0.16f), TextAnchor.MiddleCenter);
-            SetRect(levelName.rectTransform, 0f, 195f, 760f, 48f, new Vector2(0.5f, 0.5f));
-        }
-        else if (sceneName == "Level3")
-        {
-            Text levelTitle = CreateText(root.transform, "LEVEL 3 COMPLETE", 52,
-                Color.white, TextAnchor.MiddleCenter);
-            SetRect(levelTitle.rectTransform, 0f, 245f, 760f, 72f, new Vector2(0.5f, 0.5f));
+        Image card = CreateImage(root.transform, panelSprite, Color.white, true, "Finish Card");
+        SetRect(card.rectTransform, 0f, 0f, 820f, 500f, new Vector2(0.5f, 0.5f));
 
-            Text levelName = CreateText(root.transform, "PULSEBOUND FOUNDRY", 28,
-                new Color(0.25f, 0.9f, 1f), TextAnchor.MiddleCenter);
-            SetRect(levelName.rectTransform, 0f, 195f, 760f, 48f, new Vector2(0.5f, 0.5f));
-        }
+        Image banner = CreateImage(card.transform, bannerSprite, Color.white, true, "Complete Banner");
+        SetRect(banner.rectTransform, 0f, 178f, 560f, 70f, new Vector2(0.5f, 0.5f));
 
-        Sprite circle = CreateCircleSprite(128);
-        Sprite arrow = CreateArrowSprite(128);
+        TMP_Text title = CreateText(card.transform, GetLevelTitle(), 34, Color.white,
+            TextAlignmentOptions.Center, FontStyles.Bold, "Level Complete");
+        SetRect(title.rectTransform, 0f, 178f, 520f, 54f, new Vector2(0.5f, 0.5f));
 
-        Image coin = CreateImage(root.transform, circle, new Color(1f, 0.84f, 0.16f));
-        SetRect(coin.rectTransform, 0f, 90f, 88f, 88f, new Vector2(0.5f, 0.5f));
+        TMP_Text levelName = CreateText(card.transform, GetLevelName(), 18, GetAccentColor(),
+            TextAlignmentOptions.Center, FontStyles.Bold, "Level Name");
+        SetRect(levelName.rectTransform, 0f, 132f, 680f, 32f, new Vector2(0.5f, 0.5f));
 
-        Text coinCount = CreateText(root.transform, GetCoins().ToString(), 84,
-            Color.white, TextAnchor.MiddleLeft);
-        SetRect(coinCount.rectTransform, 62f, 90f, 260f, 110f, new Vector2(0.5f, 0.5f));
+        Image rewardPanel = CreateImage(card.transform,
+            rewardPanelSprite != null ? rewardPanelSprite : panelSprite,
+            Color.white, true, "Reward Panel");
+        SetRect(rewardPanel.rectTransform, 0f, 52f, 580f, 112f, new Vector2(0.5f, 0.5f));
 
-        Button next = CreateButton(root.transform, circle, new Color(0.16f, 0.75f, 0.35f));
-        SetRect(next.GetComponent<RectTransform>(), 0f, -110f, 118f, 118f, new Vector2(0.5f, 0.5f));
+        TMP_Text rewardLabel = CreateText(card.transform, "RUN REWARD", 15, new Color(0.55f, 0.78f, 0.9f),
+            TextAlignmentOptions.Center, FontStyles.Bold, "Reward Label");
+        SetRect(rewardLabel.rectTransform, -80f, 83f, 190f, 24f, new Vector2(0.5f, 0.5f));
+
+        Image coin = CreateImage(card.transform, coinSprite, Color.white, false, "Reward Coin");
+        coin.preserveAspect = true;
+        SetRect(coin.rectTransform, -196f, 52f, 72f, 72f, new Vector2(0.5f, 0.5f));
+
+        TMP_Text coinCount = CreateText(card.transform, GetCoins().ToString("N0"), 42, Color.white,
+            TextAlignmentOptions.Center, FontStyles.Bold, "Reward Count");
+        SetRect(coinCount.rectTransform, -80f, 48f, 190f, 64f, new Vector2(0.5f, 0.5f));
+
+        TMP_Text coinCaption = CreateText(card.transform, "COINS COLLECTED", 13, new Color(1f, 0.82f, 0.2f),
+            TextAlignmentOptions.Center, FontStyles.Bold, "Reward Caption");
+        SetRect(coinCaption.rectTransform, 125f, 49f, 170f, 24f, new Vector2(0.5f, 0.5f));
+
+        Button next = CreateButton(card.transform, primaryButtonSprite, Color.white, "Next Level Button");
+        SetRect(next.GetComponent<RectTransform>(), 0f, -108f, 300f, 78f, new Vector2(0.5f, 0.5f));
         next.onClick.AddListener(LoadNextLevel);
 
-        Image arrowIcon = CreateImage(next.transform, arrow, Color.white);
-        SetRect(arrowIcon.rectTransform, 0f, 8f, 56f, 56f, new Vector2(0.5f, 0.5f));
+        TMP_Text nextLabel = CreateText(next.transform, "NEXT LEVEL", 25, Color.white,
+            TextAlignmentOptions.Center, FontStyles.Bold, "Next Level Label");
+        SetRect(nextLabel.rectTransform, 0f, 0f, 278f, 56f, new Vector2(0.5f, 0.5f));
 
-        Text nextLevel = CreateText(root.transform, GetNextLevelNumber().ToString(), 50,
-            Color.white, TextAnchor.MiddleCenter);
-        SetRect(nextLevel.rectTransform, 0f, -216f, 140f, 70f, new Vector2(0.5f, 0.5f));
+        TMP_Text nextLevel = CreateText(card.transform, "LEVEL " + GetNextLevelNumber(), 15,
+            new Color(0.55f, 0.78f, 0.9f), TextAlignmentOptions.Center, FontStyles.Bold, "Next Level Number");
+        SetRect(nextLevel.rectTransform, 0f, -164f, 260f, 26f, new Vector2(0.5f, 0.5f));
 
         return root;
+    }
+
+    private string GetLevelTitle()
+    {
+        return "LEVEL " + GetCurrentLevelNumber() + " COMPLETE";
+    }
+
+    private static string GetLevelName()
+    {
+        string sceneName = SceneManager.GetActiveScene().name;
+        switch (sceneName)
+        {
+            case "Level1": return "RAMP-UP RUN";
+            case "Level2": return "MOMENTUM TRAPWORKS";
+            case "Level3": return "PULSEBOUND FOUNDRY";
+            case "Level4": return "VAULTLINE CITADEL";
+            case "Level5": return "FRACTURE RELAY";
+            default: return sceneName.ToUpperInvariant();
+        }
+    }
+
+    private static Color GetAccentColor()
+    {
+        string sceneName = SceneManager.GetActiveScene().name;
+        switch (sceneName)
+        {
+            case "Level2": return new Color(1f, 0.84f, 0.16f);
+            case "Level3": return new Color(0.25f, 0.9f, 1f);
+            case "Level4": return new Color(1f, 0.55f, 0.18f);
+            case "Level5": return new Color(0.86f, 0.16f, 0.98f);
+            default: return new Color(0.25f, 0.9f, 1f);
+        }
+    }
+
+    private static int GetCurrentLevelNumber()
+    {
+        string sceneName = SceneManager.GetActiveScene().name;
+        if (sceneName.StartsWith("Level") && int.TryParse(sceneName.Substring(5), out int levelNumber))
+        {
+            return levelNumber;
+        }
+
+        int buildIndex = SceneManager.GetActiveScene().buildIndex;
+        return buildIndex >= 0 ? buildIndex + 1 : 1;
     }
 
     private static int GetCoins()
@@ -157,85 +229,66 @@ public class FinishGate : MonoBehaviour
         }
     }
 
-    private static Image CreateImage(Transform parent, Sprite sprite, Color color)
+    private static Image CreateImage(Transform parent, Sprite sprite, Color color, bool sliced, string objectName)
     {
-        GameObject go = new GameObject("Image", typeof(RectTransform), typeof(Image));
+        GameObject go = new GameObject(objectName, typeof(RectTransform), typeof(Image));
         go.transform.SetParent(parent, false);
-        Image img = go.GetComponent<Image>();
-        img.sprite = sprite;
-        img.color = color;
-        return img;
+        Image image = go.GetComponent<Image>();
+        image.sprite = sprite;
+        image.color = color;
+        image.raycastTarget = false;
+        if (sprite != null)
+        {
+            image.type = sliced ? Image.Type.Sliced : Image.Type.Simple;
+        }
+
+        return image;
     }
 
-    private static Button CreateButton(Transform parent, Sprite sprite, Color color)
+    private static Button CreateButton(Transform parent, Sprite sprite, Color color, string objectName)
     {
-        GameObject go = new GameObject("Button", typeof(RectTransform), typeof(Image), typeof(Button));
+        GameObject go = new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(Button));
         go.transform.SetParent(parent, false);
-        Image img = go.GetComponent<Image>();
-        img.sprite = sprite;
-        img.color = color;
-        return go.GetComponent<Button>();
+        Image image = go.GetComponent<Image>();
+        image.sprite = sprite;
+        image.color = color;
+        image.type = sprite != null ? Image.Type.Sliced : Image.Type.Simple;
+
+        Button button = go.GetComponent<Button>();
+        button.targetGraphic = image;
+        ColorBlock colors = button.colors;
+        colors.normalColor = Color.white;
+        colors.highlightedColor = new Color(1f, 1f, 1f, 0.92f);
+        colors.pressedColor = new Color(1f, 1f, 1f, 0.78f);
+        button.colors = colors;
+        return button;
     }
 
-    private static Text CreateText(Transform parent, string value, int fontSize,
-        Color color, TextAnchor anchor)
+    private static TMP_Text CreateText(Transform parent, string value, float fontSize, Color color,
+        TextAlignmentOptions alignment, FontStyles fontStyle, string objectName)
     {
-        GameObject go = new GameObject("Text", typeof(RectTransform), typeof(Text));
+        GameObject go = new GameObject(objectName, typeof(RectTransform), typeof(TextMeshProUGUI));
         go.transform.SetParent(parent, false);
-        Text txt = go.GetComponent<Text>();
-        txt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        txt.text = value;
-        txt.fontSize = fontSize;
-        txt.color = color;
-        txt.alignment = anchor;
-        txt.horizontalOverflow = HorizontalWrapMode.Overflow;
-        txt.verticalOverflow = VerticalWrapMode.Overflow;
-        txt.raycastTarget = false;
-        return txt;
+        TextMeshProUGUI text = go.GetComponent<TextMeshProUGUI>();
+        text.text = value;
+        text.fontSize = fontSize;
+        text.color = color;
+        text.alignment = alignment;
+        text.fontStyle = fontStyle;
+        text.enableAutoSizing = false;
+        text.enableWordWrapping = false;
+        text.overflowMode = TextOverflowModes.Ellipsis;
+        text.raycastTarget = false;
+        text.margin = new Vector4(4f, 0f, 4f, 0f);
+        return text;
     }
 
-    private static void SetRect(RectTransform rect, float x, float y, float w, float h, Vector2 anchor)
+    private static void SetRect(RectTransform rect, float x, float y, float width, float height, Vector2 anchor)
     {
         rect.anchorMin = anchor;
         rect.anchorMax = anchor;
-        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.pivot = anchor;
         rect.anchoredPosition = new Vector2(x, y);
-        rect.sizeDelta = new Vector2(w, h);
-    }
-
-    private static Sprite CreateCircleSprite(int size)
-    {
-        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
-        float center = (size - 1) * 0.5f;
-        float radius = center;
-        for (int y = 0; y < size; y++)
-        {
-            for (int x = 0; x < size; x++)
-            {
-                float dx = x - center;
-                float dy = y - center;
-                tex.SetPixel(x, y, (dx * dx + dy * dy) <= radius * radius
-                    ? Color.white : Color.clear);
-            }
-        }
-        tex.Apply();
-        return Sprite.Create(tex, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f));
-    }
-
-    private static Sprite CreateArrowSprite(int size)
-    {
-        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
-        for (int y = 0; y < size; y++)
-        {
-            for (int x = 0; x < size; x++)
-            {
-                float u = x / (float)(size - 1);
-                float v = y / (float)(size - 1);
-                float spread = Mathf.Abs(v - 0.5f) * 2f;
-                tex.SetPixel(x, y, u >= spread ? Color.white : Color.clear);
-            }
-        }
-        tex.Apply();
-        return Sprite.Create(tex, new Rect(0f, 0f, size, size), new Vector2(0.5f, 0.5f));
+        rect.sizeDelta = new Vector2(width, height);
     }
 }
