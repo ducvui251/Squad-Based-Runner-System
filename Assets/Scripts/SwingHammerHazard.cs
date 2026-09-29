@@ -18,19 +18,23 @@ public class SwingHammerHazard : MonoBehaviour
     [SerializeField, Min(0.05f)] private float killRadius = 0.8f;
     [SerializeField, Min(0.1f)] private float verticalHitRange = 1.25f;
     [FormerlySerializedAs("maxRunnersPerCycle")]
-    [SerializeField, Min(1)] private int maxHeadRunnersPerCycle = 8;
-    [SerializeField, Min(1)] private int maxArmRunnersPerCycle = 3;
-    [SerializeField, Min(0.1f)] private float armVerticalHitRange = 2.2f;
+#pragma warning disable CS0414 // Preserve old scene values without using them as damage limits.
+    [SerializeField, HideInInspector] private int maxHeadRunnersPerCycle = 8;
+    [SerializeField, HideInInspector] private int maxArmRunnersPerCycle = 3;
+#pragma warning restore CS0414
+    // The authored arm is 0.25m thick (0.125m half-thickness); add 0.25m
+    // deliberate clearance so the collision envelope is 0.375m vertically.
+    [SerializeField, Min(0.1f)] private float armVerticalHitRange = 0.375f;
+    [Tooltip("Authored vertical body height used when testing the hammer handle against a runner.")]
+    [SerializeField, Min(0.1f)] private float runnerHeight = 1.6f;
 
     [Header("Presentation")]
     [SerializeField] private Transform armVisual;
     [SerializeField] private Transform hammerHead;
+    [SerializeField] private BoxCollider armHitVolume;
 
     private PlayerCrowdManager cachedCrowdManager;
     private float swingClock;
-    private int currentCycle = -1;
-    private int headCycleLosses;
-    private int armCycleLosses;
 
     private void OnValidate()
     {
@@ -40,9 +44,9 @@ public class SwingHammerHazard : MonoBehaviour
         armLength = Mathf.Clamp(armLength, 0.5f, 4f);
         killRadius = Mathf.Clamp(killRadius, 0.05f, 1.5f);
         verticalHitRange = Mathf.Clamp(verticalHitRange, 0.1f, 2.5f);
-        maxHeadRunnersPerCycle = Mathf.Clamp(maxHeadRunnersPerCycle, 1, 16);
-        maxArmRunnersPerCycle = Mathf.Clamp(maxArmRunnersPerCycle, 1, 8);
         armVerticalHitRange = Mathf.Clamp(armVerticalHitRange, 0.1f, 3f);
+        runnerHeight = Mathf.Clamp(runnerHeight, 0.1f, 3f);
+        if (armHitVolume != null) armHitVolume.isTrigger = true;
     }
 
     private void Start()
@@ -65,14 +69,6 @@ public class SwingHammerHazard : MonoBehaviour
         if (cachedCrowdManager.transform.position.z < transform.position.z - activationDistance) return;
 
         swingClock += Time.deltaTime;
-        int nextCycle = Mathf.FloorToInt(swingClock / oscillationDuration);
-        if (nextCycle != currentCycle)
-        {
-            currentCycle = nextCycle;
-            headCycleLosses = 0;
-            armCycleLosses = 0;
-        }
-
         UpdateHammerVisual();
         CheckRunnerCollisions();
     }
@@ -110,13 +106,11 @@ public class SwingHammerHazard : MonoBehaviour
 
     private void CheckHeadCollisions()
     {
-        if (headCycleLosses >= maxHeadRunnersPerCycle) return;
-
         Vector3 hitCenter = hammerHead != null ? hammerHead.position : CurrentHeadPosition();
         var runners = cachedCrowdManager.ActiveRunners;
         float radiusSqr = killRadius * killRadius;
 
-        for (int i = runners.Count - 1; i >= 0 && headCycleLosses < maxHeadRunnersPerCycle; i--)
+        for (int i = runners.Count - 1; i >= 0; i--)
         {
             if (i >= runners.Count || runners[i] == null) continue;
 
@@ -126,44 +120,52 @@ public class SwingHammerHazard : MonoBehaviour
             bool insideHeight = Mathf.Abs(delta.y) <= verticalHitRange;
             if (!insideRadius || !insideHeight) continue;
 
-            bool removed = cachedCrowdManager.RemoveRunnerByHazard(
+            cachedCrowdManager.RemoveRunnerByHazard(
                 runner,
                 runner.transform.position + Vector3.up * 0.5f,
                 GetRunnerColor(runner));
-            if (removed) headCycleLosses++;
         }
     }
 
     private void CheckArmCollisions()
     {
-        if (armCycleLosses >= maxArmRunnersPerCycle) return;
-
-        Vector3 armCenter = armVisual != null
-            ? armVisual.position
+        Transform collisionTransform = armHitVolume != null ? armHitVolume.transform : armVisual;
+        Vector3 armCenter = collisionTransform != null
+            ? collisionTransform.position
             : transform.position + Vector3.down * 1.1f;
-        Vector3 armDirection = armVisual != null
-            ? armVisual.right
+        Vector3 armDirection = collisionTransform != null
+            ? collisionTransform.right
             : Quaternion.Euler(0f, CurrentAngle(), 0f) * Vector3.right;
-        Vector3 armStart = armCenter - armDirection * armLength;
-        Vector3 armEnd = armCenter + armDirection * armLength;
+        float collisionHalfLength = armLength;
+        float collisionHalfHeight = armVerticalHitRange;
+        if (armHitVolume != null)
+        {
+            Vector3 scale = armHitVolume.transform.lossyScale;
+            collisionHalfLength = Mathf.Max(0.05f, armHitVolume.size.x * Mathf.Abs(scale.x) * 0.5f);
+            collisionHalfHeight = Mathf.Max(collisionHalfHeight,
+                armHitVolume.size.y * Mathf.Abs(scale.y) * 0.5f);
+        }
+        Vector3 armStart = armCenter - armDirection * collisionHalfLength;
+        Vector3 armEnd = armCenter + armDirection * collisionHalfLength;
         var runners = cachedCrowdManager.ActiveRunners;
         float radiusSqr = killRadius * killRadius;
 
-        for (int i = runners.Count - 1; i >= 0 && armCycleLosses < maxArmRunnersPerCycle; i--)
+        for (int i = runners.Count - 1; i >= 0; i--)
         {
             if (i >= runners.Count || runners[i] == null) continue;
 
             GameObject runner = runners[i];
             Vector3 runnerPosition = runner.transform.position;
             bool insideArm = DistanceToSegmentSqrXZ(runnerPosition, armStart, armEnd) <= radiusSqr;
-            bool insideHeight = Mathf.Abs(runnerPosition.y - armCenter.y) <= armVerticalHitRange;
+            bool insideHeight = VerticalRangesOverlap(
+                runnerPosition.y, runnerPosition.y + runnerHeight,
+                armCenter.y - collisionHalfHeight, armCenter.y + collisionHalfHeight);
             if (!insideArm || !insideHeight) continue;
 
-            bool removed = cachedCrowdManager.RemoveRunnerByHazard(
+            cachedCrowdManager.RemoveRunnerByHazard(
                 runner,
                 runnerPosition + Vector3.up * 0.5f,
                 GetRunnerColor(runner));
-            if (removed) armCycleLosses++;
         }
     }
 
@@ -178,6 +180,11 @@ public class SwingHammerHazard : MonoBehaviour
         float t = Mathf.Clamp01(Vector2.Dot(pointXZ - startXZ, segment) / segmentLengthSqr);
         Vector2 closest = startXZ + segment * t;
         return (pointXZ - closest).sqrMagnitude;
+    }
+
+    private static bool VerticalRangesOverlap(float minA, float maxA, float minB, float maxB)
+    {
+        return maxA >= minB && minA <= maxB;
     }
 
     private static Color GetRunnerColor(GameObject runner)

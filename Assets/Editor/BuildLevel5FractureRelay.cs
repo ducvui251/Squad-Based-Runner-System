@@ -10,6 +10,17 @@ public static class BuildLevel5FractureRelay
 {
     private const string SourceScenePath = "Assets/Scenes/Level4.unity";
     private const string Level5ScenePath = "Assets/Scenes/Level5.unity";
+    private const string SwingHammerPrefabPath = "Assets/Prefabs/Traps/Shared/SwingHammer.prefab";
+    private const string SwingHammerPrefabGuid = "6a636c385c2777a4e9b2f5f288707ec5";
+
+    private const float FinalFractureNearEdgeZ = 386f;
+    private const float FinalFractureFarEdgeZ = 399.13f;
+    private const float PreviousFinalFractureFarEdgeZ = 390f;
+    private const float FinalRoadLength = 30f;
+    private const float FinalRoadEndZ = FinalFractureFarEdgeZ + FinalRoadLength;
+    private const float FinalFractureLength = FinalFractureFarEdgeZ - FinalFractureNearEdgeZ;
+    private const float FinalSpikeOffsetFromFarEdgeZ = 10.82f;
+    public const float PostFinalGapShiftZ = FinalFractureFarEdgeZ - PreviousFinalFractureFarEdgeZ;
 
     private static Material obstacleMaterial;
     private static Material telegraphMaterial;
@@ -22,8 +33,8 @@ public static class BuildLevel5FractureRelay
     private static Material hammerMaterial;
     private static Material cannonMaterial;
     private static Material markerMaterial;
-    private static Material fractureSurfaceMaterial;
     private static Material fractureEdgeMaterial;
+    private static GameObject swingHammerPrefab;
 
     [MenuItem("SpiralSquad/Build Level 5 - Fracture Relay")]
     public static void Main()
@@ -72,6 +83,8 @@ public static class BuildLevel5FractureRelay
         ConfigureHudAndCamera(scene);
         ConfigurePickups(root);
         BuildTrapSections(root, playerOnlyLayer);
+        Level5TankBossBuilder.Configure(scene, root);
+        LevelEnemyEncounterAuthoring.RebuildForLevel(root, 5);
 
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
@@ -93,7 +106,6 @@ public static class BuildLevel5FractureRelay
         hammerMaterial = LoadOrCreateMaterial("Assets/Materials/Level3_Hammer.mat", "Level5_Hammer", new Color(1f, 0.58f, 0.08f));
         cannonMaterial = LoadOrCreateMaterial("Assets/Materials/Level4_VaultlineCannon.mat", "Level5_Cannon", new Color(0.32f, 0.10f, 0.52f));
         markerMaterial = LoadOrCreateMaterial("Assets/Materials/Level4_VaultlineMarker.mat", "Level5_Marker", new Color(0.30f, 0.85f, 1f));
-        fractureSurfaceMaterial = EnsureMaterial("Level5_FractureSurface", new Color(0.04f, 0.03f, 0.08f));
         fractureEdgeMaterial = EnsureMaterial("Level5_FractureEdge", new Color(0.86f, 0.16f, 0.98f));
     }
 
@@ -118,11 +130,18 @@ public static class BuildLevel5FractureRelay
         Transform trackParent = track.parent;
         EnsureRoadSegment(trackParent, "Road Segment 00-304", 152f, 304f, trackMaterial);
         EnsureRoadSegment(trackParent, "Road Segment 308-386", 347f, 78f, trackMaterial);
-        EnsureRoadSegment(trackParent, "Road Segment 390-420", 405f, 30f, trackMaterial);
+        EnsureRoadSegment(
+            trackParent,
+            "Road Segment 399.13-429.13",
+            (FinalFractureFarEdgeZ + FinalRoadEndZ) * 0.5f,
+            FinalRoadLength,
+            trackMaterial,
+            "Road Segment 390-420");
 
         SetLocalPosition(root.transform.Find("Track/Start Line"), new Vector3(0f, 0.01f, 3f));
-        SetLocalPosition(root.transform.Find("Track/Finish Marker"), new Vector3(0f, 0.02f, 416f));
-        SetLocalPosition(root.transform.Find("FinishGate"), new Vector3(0f, 0f, 418f));
+        SetLocalPosition(root.transform.Find("Track/Finish Marker"), new Vector3(0f, 0.02f, 418f + PostFinalGapShiftZ));
+        SetLocalPosition(root.transform.Find("FinishGate"), new Vector3(0f, 0f, 418f + PostFinalGapShiftZ));
+        foreach (var finish in root.GetComponentsInChildren<FinishGate>(true)) CollisionAuditValidator.AuthorFinish(finish);
 
         GameObject player = FindInScene(scene, "Player");
         if (player == null) throw new InvalidOperationException("Player not found in the Level 5 copy.");
@@ -133,20 +152,27 @@ public static class BuildLevel5FractureRelay
         {
             SetFloat(controller, "forwardSpeed", 6f);
             SetFloat(controller, "startForwardSpeed", 6f);
-            SetFloat(controller, "maxForwardSpeed", 10f);
+            SetFloat(controller, "maxForwardSpeed", 24f);
             SetFloat(controller, "speedRampStartZ", 3f);
-            SetFloat(controller, "speedRampEndZ", 418f);
+            SetFloat(controller, "speedRampEndZ", 209f);
             SetFloat(controller, "jumpForce", 8f);
             SetFloat(controller, "gravity", -20f);
             SetFloat(controller, "jumpReleaseVelocityMultiplier", 0.35f);
         }
     }
 
-    private static void EnsureRoadSegment(Transform parent, string name, float centerZ, float length, Material material)
+    private static void EnsureRoadSegment(
+        Transform parent,
+        string name,
+        float centerZ,
+        float length,
+        Material material,
+        string legacyName = null)
     {
         if (parent == null) throw new InvalidOperationException("Track parent not found while creating Level 5 road segments.");
 
         Transform existing = parent.Find(name);
+        if (existing == null && !string.IsNullOrEmpty(legacyName)) existing = parent.Find(legacyName);
         GameObject segment;
         if (existing == null)
         {
@@ -159,6 +185,7 @@ public static class BuildLevel5FractureRelay
             segment = existing.gameObject;
         }
 
+        segment.name = name;
         segment.SetActive(true);
         segment.transform.localPosition = new Vector3(0f, -0.1f, centerZ);
         segment.transform.localRotation = Quaternion.identity;
@@ -273,6 +300,14 @@ public static class BuildLevel5FractureRelay
     {
         Transform sections = root.transform.Find("Trap Sections");
         if (sections == null) throw new InvalidOperationException("Trap Sections parent not found.");
+        Transform track = root.transform.Find("Track");
+        if (track == null) throw new InvalidOperationException("Track parent not found.");
+        Collider nearFinalRoad = FindRoadCollider(track, "Road Segment 308-386");
+        Collider farFinalRoad = FindRoadCollider(track, "Road Segment 399.13-429.13", "Road Segment 390-420");
+        if (nearFinalRoad == null || farFinalRoad == null)
+        {
+            throw new InvalidOperationException("The final cracked span requires near and far road colliders.");
+        }
         ClearChildren(sections);
 
         Transform crosswind = CreateSection(sections, "Crosswind Pulse Weave");
@@ -299,16 +334,16 @@ public static class BuildLevel5FractureRelay
 
         Transform pendulum = CreateSection(sections, "Pendulum Shutter Exchange");
         CreateHammer(pendulum, "Swing Hammer 01", -2.4f, 220f, 0f);
-        CreateShutter(pendulum, "Shutter Panel 01", 2.4f, 230f, 0.75f);
-        CreateSpike(pendulum, "Spike Shuttle 01", 244f, -3.8f, 3.8f, 0f, -1f);
+        CreateShutter(pendulum, "Shutter Panel 01", 2.4f, 230f, 0.75f, 0.5f);
+        CreateSpike(pendulum, "Spike Shuttle 01", 244f, -3.8f, 3.8f, 0.75f, -1f);
         CreateCannon(pendulum, "Side Cannon 01", 4.35f, 254f, 1f);
-        CreateShutter(pendulum, "Shutter Pair L", -1.2f, 264f, 1.8f);
-        CreateShutter(pendulum, "Shutter Pair R", 1.2f, 264f, 1.8f);
+        CreateShutter(pendulum, "Shutter Pair L", -1.2f, 264f, 1.8f, 1.1f);
+        CreateShutter(pendulum, "Shutter Pair R", 1.2f, 264f, 1.8f, 1.1f);
 
         Transform tutorial = CreateSection(sections, "Fracture Tutorial");
         CreateBarrier(tutorial, "Vault Barrier 01", -2.4f, 276f, 1.8f, 0.95f);
         CreateSweep(tutorial, "Sweep Beam 01", 288f, 3.6f, -3.6f, 0f);
-        CreateCrackedSpan(tutorial, "Cracked Span 01 Tutorial", 304f, "Assets/Prefabs/Traps/Level5/CrackedSpan_Short.prefab", playerOnlyLayer);
+        CreateCrackedSpan(tutorial, "Cracked Span 01 Tutorial", 304f, 4f, "Assets/Prefabs/Traps/Level5/CrackedSpan_Short.prefab", playerOnlyLayer);
 
         Transform finalRelay = CreateSection(sections, "Final Fracture Relay");
         CreateConeRow(finalRelay, "Final Cone Row", -3.2f, 3.2f, 336f);
@@ -318,8 +353,8 @@ public static class BuildLevel5FractureRelay
         CreateCannon(finalRelay, "Final Side Cannon", -4.35f, 360f, 0.6f);
         CreateRising(finalRelay, "Final Rising Block", 0f, 368f, 3.4f, 3.2f, 1f);
         CreateSaw(finalRelay, "Circular Saw 03", 378f, false, 3.6f);
-        CreateCrackedSpan(finalRelay, "Cracked Span 02 Final", 386f, "Assets/Prefabs/Traps/Level5/CrackedSpan_Final.prefab", playerOnlyLayer);
-        CreateSpike(finalRelay, "Spike Shuttle 02 Final", 400f, 3.8f, -3.8f, 0f, 402f);
+        CreateCrackedSpan(finalRelay, "Cracked Span 02 Final", FinalFractureNearEdgeZ, FinalFractureLength, "Assets/Prefabs/Traps/Level5/CrackedSpan_Final.prefab", playerOnlyLayer, nearFinalRoad, farFinalRoad);
+        CreateSpike(finalRelay, "Spike Shuttle 02 Final", FinalFractureFarEdgeZ + FinalSpikeOffsetFromFarEdgeZ, 3.8f, -3.8f, 0.75f, 2f);
     }
 
     private static void CreateConeRow(Transform parent, string name, float leftX, float rightX, float z)
@@ -366,7 +401,11 @@ public static class BuildLevel5FractureRelay
         CircularSaw saw = root.AddComponent<CircularSaw>();
         SetFloat(saw, "moveSpeed", moveSpeed);
         SetFloat(saw, "spinSpeed", 420f);
-        SetFloat(saw, "killRadius", 0.8f);
+        // The authored disc is 1.8m wide (0.9m radius). CircularSaw tests
+        // the runner body segment, so the explicit sphere radius now covers
+        // the visible disc edge without renderer-bound fitting at runtime.
+        SetFloat(saw, "killRadius", 0.9f);
+        SetFloat(saw, "runnerHeight", 1.6f);
         SetBool(saw, "useExplicitXLimits", true);
         SetFloat(saw, "leftLimitOverride", -3.6f);
         SetFloat(saw, "rightLimitOverride", 3.6f);
@@ -376,37 +415,24 @@ public static class BuildLevel5FractureRelay
 
     private static void CreatePulse(Transform parent, string name, float x, float z, float phase)
     {
-        GameObject pulsePrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Level3/PulsePlate.prefab");
-        if (pulsePrefab != null)
-        {
-            GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(pulsePrefab, parent);
-            instance.name = name;
-            instance.transform.localPosition = new Vector3(x, 0.12f, z);
-            PulsePlateHazard hazard = instance.GetComponent<PulsePlateHazard>();
-            SetFloat(hazard, "cycleDuration", 2.45f);
-            SetFloat(hazard, "chargeDuration", 0.75f);
-            SetFloat(hazard, "dischargeDuration", 0.35f);
-            SetFloat(hazard, "phaseOffset", phase);
-            SetFloat(hazard, "killRadius", 1.05f);
-            SetInt(hazard, "maxRunnersPerDischarge", 2);
-            return;
-        }
-
-        GameObject root = new GameObject(name);
-        root.transform.SetParent(parent, false);
-        root.transform.localPosition = new Vector3(x, 0.12f, z);
-        CreatePrimitive("Plate", PrimitiveType.Cylinder, root.transform, Vector3.zero, new Vector3(1.9f, 0.06f, 1.9f), pulseBodyMaterial);
-        GameObject charge = CreatePrimitive("Charge Ring", PrimitiveType.Cylinder, root.transform, new Vector3(0f, 0.08f, 0f), new Vector3(2.2f, 0.025f, 2.2f), pulseChargeMaterial);
-        GameObject discharge = CreatePrimitive("Discharge Ring", PrimitiveType.Cylinder, root.transform, new Vector3(0f, 0.11f, 0f), new Vector3(2.4f, 0.03f, 2.4f), pulseDischargeMaterial);
-        PulsePlateHazard pulse = root.AddComponent<PulsePlateHazard>();
-        SetFloat(pulse, "cycleDuration", 2.45f);
-        SetFloat(pulse, "chargeDuration", 0.75f);
-        SetFloat(pulse, "dischargeDuration", 0.35f);
-        SetFloat(pulse, "phaseOffset", phase);
-        SetFloat(pulse, "killRadius", 1.05f);
-        SetInt(pulse, "maxRunnersPerDischarge", 2);
-        SetTransform(pulse, "chargeRing", charge.transform);
-        SetTransform(pulse, "dischargeRing", discharge.transform);
+        const string pulsePath = "Assets/Prefabs/Traps/Level3/PulsePlate.prefab";
+        const string pulseGuid = "3857dd2ec61e66f4ba246095bb02bec2";
+        if (AssetDatabase.AssetPathToGUID(pulsePath) != pulseGuid)
+            throw new InvalidOperationException("PulsePlate prefab GUID/path contract failed for Level5: " + pulsePath);
+        GameObject pulsePrefab = AssetDatabase.LoadAssetAtPath<GameObject>(pulsePath);
+        if (pulsePrefab == null || pulsePrefab.GetComponent<PulsePlateHazard>() == null)
+            throw new InvalidOperationException("Level5 requires the validated PulsePlate prefab at " + pulsePath);
+        GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(pulsePrefab, parent);
+        instance.name = name;
+        instance.transform.localPosition = new Vector3(x, 0.12f, z);
+        PulsePlateHazard hazard = instance.GetComponent<PulsePlateHazard>();
+        SetFloat(hazard, "cycleDuration", 2.45f);
+        SetFloat(hazard, "chargeDuration", 0.75f);
+        SetFloat(hazard, "dischargeDuration", 0.35f);
+        SetFloat(hazard, "chargeRingBaseRadius", 1.1f);
+        SetFloat(hazard, "dischargeRingBaseRadius", 1.2f);
+        SetFloat(hazard, "runnerHeight", 1.6f);
+        SetFloat(hazard, "phaseOffset", phase);
     }
 
     private static void CreateRising(Transform parent, string name, float x, float z, float width, float cycle, float phase)
@@ -416,12 +442,11 @@ public static class BuildLevel5FractureRelay
         SetFloat(hazard, "width", width);
         SetFloat(hazard, "raisedHeight", 1.05f);
         SetFloat(hazard, "cycleDuration", cycle);
-        SetFloat(hazard, "riseDuration", 0.45f);
+        SetFloat(hazard, "riseDuration", 0.225f);
         SetFloat(hazard, "raisedHold", 1.1f);
-        SetFloat(hazard, "lowerDuration", 0.45f);
+        SetFloat(hazard, "lowerDuration", 0.225f);
         SetFloat(hazard, "phaseOffset", phase);
         SetFloat(hazard, "warningLead", 1f);
-        SetInt(hazard, "lossCap", 6);
     }
 
     private static void CreateBarrier(Transform parent, string name, float x, float z, float width, float height)
@@ -432,7 +457,6 @@ public static class BuildLevel5FractureRelay
         SetFloat(hazard, "height", height);
         SetFloat(hazard, "verticalClearanceMargin", 0.25f);
         SetFloat(hazard, "warningLead", 8f);
-        SetInt(hazard, "lossCap", 8);
     }
 
     private static void CreateSweep(Transform parent, string name, float z, float startX, float endX, float phase)
@@ -450,24 +474,23 @@ public static class BuildLevel5FractureRelay
         SetFloat(hazard, "endpointPause", 0.5f);
         SetFloat(hazard, "phaseOffset", phase);
         SetFloat(hazard, "warningLead", 1f);
-        SetInt(hazard, "lossCap", 5);
     }
 
-    private static void CreateShutter(Transform parent, string name, float x, float z, float phase)
+    private static void CreateShutter(Transform parent, string name, float x, float z, float phase, float totalOpenDuration)
     {
         GameObject instance = InstantiatePrefab("Assets/Prefabs/Traps/Level4/ShutterBlock_Single.prefab", parent, name, new Vector3(x, 0f, z));
         ShutterBlockHazard hazard = instance.GetComponent<ShutterBlockHazard>();
         SetFloat(hazard, "panelWidth", 1.8f);
         SetFloat(hazard, "panelHeight", 1f);
-        SetFloat(hazard, "openDuration", 1.1f);
-        SetFloat(hazard, "closeDuration", 0.35f);
+        SetFloat(hazard, "openDuration", totalOpenDuration * 0.5f);
+        SetFloat(hazard, "openHoldDuration", totalOpenDuration * 0.5f);
+        SetFloat(hazard, "closeDuration", 0.175f);
         SetFloat(hazard, "raisedHold", 1.25f);
         SetFloat(hazard, "phaseOffset", phase);
         SetFloat(hazard, "warningLead", 0.8f);
-        SetInt(hazard, "lossCap", 6);
     }
 
-    private static void CreateSpike(Transform parent, string name, float z, float startX, float endX, float phase, float hitCheckEndZ)
+    private static void CreateSpike(Transform parent, string name, float z, float startX, float endX, float phase, float hitCheckEndOffset)
     {
         GameObject root = new GameObject(name);
         root.transform.SetParent(parent, false);
@@ -483,27 +506,37 @@ public static class BuildLevel5FractureRelay
         SpikeSweepHazard hazard = root.AddComponent<SpikeSweepHazard>();
         SetFloat(hazard, "startX", startX);
         SetFloat(hazard, "endX", endX);
-        SetFloat(hazard, "travelDuration", 3f);
-        SetFloat(hazard, "endpointPause", 0.75f);
+        SetFloat(hazard, "travelDuration", 0.5f);
+        SetFloat(hazard, "endpointPause", 0.2f);
         SetFloat(hazard, "phaseOffset", phase);
         SetFloat(hazard, "approachDistance", 24f);
-        SetFloat(hazard, "hitCheckEndZ", hitCheckEndZ);
-        SetFloat(hazard, "killRadius", 0.65f);
+        SetFloat(hazard, "hitCheckEndOffset", hitCheckEndOffset);
+        SetFloat(hazard, "carriageRadius", 0.775f);
         SetFloat(hazard, "runnerCollisionPadding", 0.25f);
         SetFloat(hazard, "verticalHitRange", 0.8f);
-        SetInt(hazard, "maxRunnersPerLeg", 4);
         SetTransform(hazard, "carriageVisual", carriage.transform);
     }
 
     private static void CreateHammer(Transform parent, string name, float x, float z, float phase)
     {
-        GameObject root = new GameObject(name);
-        root.transform.SetParent(parent, false);
+        if (swingHammerPrefab == null) swingHammerPrefab = LoadSwingHammerPrefab();
+        GameObject root = (GameObject)PrefabUtility.InstantiatePrefab(swingHammerPrefab, parent);
+        root.name = name;
         root.transform.localPosition = new Vector3(x, 3.2f, z);
-        CreatePrimitive("Reach Marker", PrimitiveType.Cylinder, root.transform, new Vector3(0f, -3.08f, 0f), new Vector3(4.2f, 0.025f, 1.1f), markerMaterial);
-        GameObject arm = CreatePrimitive("Hammer Arm", PrimitiveType.Cube, root.transform, new Vector3(0f, -1.1f, 0f), new Vector3(4f, 0.25f, 0.25f), hammerMaterial);
-        GameObject head = CreatePrimitive("Hammer Head", PrimitiveType.Sphere, root.transform, new Vector3(0f, -2.2f, 0f), new Vector3(0.9f, 0.9f, 0.9f), hammerMaterial);
-        SwingHammerHazard hazard = root.AddComponent<SwingHammerHazard>();
+        Transform marker = root.transform.Find("Reach Marker");
+        Transform arm = root.transform.Find("Hammer Arm");
+        Transform head = root.transform.Find("Hammer Head");
+        BoxCollider armHitVolume = arm != null ? arm.GetComponent<BoxCollider>() : null;
+        SwingHammerHazard hazard = root.GetComponent<SwingHammerHazard>();
+        if (marker == null || arm == null || head == null || armHitVolume == null || hazard == null)
+            throw new InvalidOperationException("Shared SwingHammer prefab contract is incomplete.");
+
+        Renderer markerRenderer = marker.GetComponent<Renderer>();
+        Renderer armRenderer = arm.GetComponent<Renderer>();
+        Renderer headRenderer = head.GetComponent<Renderer>();
+        if (markerRenderer != null) markerRenderer.sharedMaterial = markerMaterial;
+        if (armRenderer != null) armRenderer.sharedMaterial = hammerMaterial;
+        if (headRenderer != null) headRenderer.sharedMaterial = hammerMaterial;
         SetFloat(hazard, "oscillationDuration", 2.6f);
         SetFloat(hazard, "angleRange", 55f);
         SetFloat(hazard, "phaseOffset", phase);
@@ -511,11 +544,25 @@ public static class BuildLevel5FractureRelay
         SetFloat(hazard, "armLength", 2f);
         SetFloat(hazard, "killRadius", 0.8f);
         SetFloat(hazard, "verticalHitRange", 1.25f);
-        SetInt(hazard, "maxHeadRunnersPerCycle", 2);
-        SetInt(hazard, "maxArmRunnersPerCycle", 1);
-        SetFloat(hazard, "armVerticalHitRange", 2.2f);
-        SetTransform(hazard, "armVisual", arm.transform);
-        SetTransform(hazard, "hammerHead", head.transform);
+        SetFloat(hazard, "armVerticalHitRange", 0.375f);
+        SetFloat(hazard, "runnerHeight", 1.6f);
+        SetTransform(hazard, "armVisual", arm);
+        SetTransform(hazard, "hammerHead", head);
+        SetSerialized(hazard, "armHitVolume", property => property.objectReferenceValue = armHitVolume);
+    }
+
+    private static GameObject LoadSwingHammerPrefab()
+    {
+        string guidPath = AssetDatabase.GUIDToAssetPath(SwingHammerPrefabGuid);
+        if (!string.Equals(guidPath, SwingHammerPrefabPath, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("SwingHammer GUID resolves to '" + guidPath + "', expected '" + SwingHammerPrefabPath + "'.");
+
+        GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(SwingHammerPrefabPath);
+        Transform arm = prefab != null ? prefab.transform.Find("Hammer Arm") : null;
+        BoxCollider hitVolume = arm != null ? arm.GetComponent<BoxCollider>() : null;
+        if (prefab == null || prefab.GetComponent<SwingHammerHazard>() == null || hitVolume == null || !hitVolume.isTrigger)
+            throw new InvalidOperationException("Shared SwingHammer prefab is missing its hazard or trigger handle contract.");
+        return prefab;
     }
 
     private static void CreateCannon(Transform parent, string name, float x, float z, float phase)
@@ -534,22 +581,26 @@ public static class BuildLevel5FractureRelay
         SetFloat(launcher, "initialFireDelay", phase);
     }
 
-    private static void CreateCrackedSpan(Transform parent, string name, float z, string prefabPath, int playerOnlyLayer)
+    private static void CreateCrackedSpan(Transform parent, string name, float z, float spanLength, string prefabPath, int playerOnlyLayer, Collider nearRoadCollider = null, Collider farRoadCollider = null)
     {
         GameObject instance = InstantiatePrefab(prefabPath, parent, name, new Vector3(0f, 0f, z));
+        instance.transform.localRotation = Quaternion.identity;
+        instance.transform.localScale = Vector3.one;
         CrackedSpanHazard hazard = instance.GetComponent<CrackedSpanHazard>();
-        SetFloat(hazard, "spanLength", 4f);
+        SetFloat(hazard, "spanLength", spanLength);
         SetFloat(hazard, "requiredClearance", 1.25f);
         SetFloat(hazard, "stopperWidth", 9.2f);
         SetFloat(hazard, "stopperHeight", 1.15f);
         SetFloat(hazard, "stopperDepth", 0.25f);
-        SetFloat(hazard, "warningDistance", 10f);
+        SetFloat(hazard, "warningDistance", 20f);
         SetInt(hazard, "failedLossCap", 10);
         SetFloat(hazard, "failedLossPercent", 0.15f);
         SetInt(hazard, "leadStopperLayer", playerOnlyLayer);
         SetFloat(hazard, "hitPadding", 0f);
         SetBool(hazard, "usePhysicalGap", true);
         SetFloat(hazard, "pitDepth", 2.5f);
+        SetSerialized(hazard, "nearRoadCollider", property => property.objectReferenceValue = nearRoadCollider);
+        SetSerialized(hazard, "farRoadCollider", property => property.objectReferenceValue = farRoadCollider);
         SetFloat(hazard, "roadSurfaceOffset", 0f);
         SetFloat(hazard, "farEdgeClearance", 0.15f);
         SetFloat(hazard, "runnerLandingTolerance", 0.05f);
@@ -560,13 +611,20 @@ public static class BuildLevel5FractureRelay
         if (leadStopper != null) leadStopper.gameObject.SetActive(false);
     }
 
+    private static Collider FindRoadCollider(Transform track, string roadName, string fallbackName = null)
+    {
+        Transform road = track.Find(roadName);
+        if (road == null && !string.IsNullOrEmpty(fallbackName)) road = track.Find(fallbackName);
+        return road != null ? road.GetComponent<Collider>() : null;
+    }
+
     private static void CreateCrackPrefabFamilies(int playerOnlyLayer)
     {
         EnsureFolder("Assets/Prefabs/Traps");
         EnsureFolder("Assets/Prefabs/Traps/Level5");
-        EnsureCrackPrefab("Assets/Prefabs/Traps/Level5/CrackedSpanBase.prefab", "CrackedSpanBase", 4f, playerOnlyLayer, false);
-        EnsureCrackPrefab("Assets/Prefabs/Traps/Level5/CrackedSpan_Short.prefab", "CrackedSpan_Short", 4f, playerOnlyLayer, false);
-        EnsureCrackPrefab("Assets/Prefabs/Traps/Level5/CrackedSpan_Final.prefab", "CrackedSpan_Final", 4f, playerOnlyLayer, true);
+        EnsureCrackPrefab("Assets/Prefabs/Traps/Level5/CrackedSpanBase.prefab", "CrackedSpanBase", 4f, playerOnlyLayer);
+        EnsureCrackPrefab("Assets/Prefabs/Traps/Level5/CrackedSpan_Short.prefab", "CrackedSpan_Short", 4f, playerOnlyLayer);
+        EnsureCrackPrefab("Assets/Prefabs/Traps/Level5/CrackedSpan_Final.prefab", "CrackedSpan_Final", 4f, playerOnlyLayer);
         ConfigureCrackPrefabForGap("Assets/Prefabs/Traps/Level5/CrackedSpanBase.prefab", playerOnlyLayer, 4f);
         ConfigureCrackPrefabForGap("Assets/Prefabs/Traps/Level5/CrackedSpan_Short.prefab", playerOnlyLayer, 4f);
         ConfigureCrackPrefabForGap("Assets/Prefabs/Traps/Level5/CrackedSpan_Final.prefab", playerOnlyLayer, 4f);
@@ -574,7 +632,7 @@ public static class BuildLevel5FractureRelay
         EnsureLeadStopperPrefab("Assets/Prefabs/Traps/Level5/CrackLeadStopper.prefab", playerOnlyLayer);
     }
 
-    private static void EnsureCrackPrefab(string path, string name, float spanLength, int playerOnlyLayer, bool finalStyle)
+    private static void EnsureCrackPrefab(string path, string name, float spanLength, int playerOnlyLayer)
     {
         if (AssetDatabase.LoadAssetAtPath<GameObject>(path) != null) return;
 
@@ -582,20 +640,11 @@ public static class BuildLevel5FractureRelay
         Transform visual = new GameObject("Visual").transform;
         visual.SetParent(root.transform, false);
 
-        Material surface = finalStyle ? fractureSurfaceMaterial : fractureSurfaceMaterial;
-        Material edge = finalStyle ? fractureEdgeMaterial : fractureEdgeMaterial;
-        CreatePrimitive("CrackBed", PrimitiveType.Cube, visual, new Vector3(0f, -0.015f, spanLength * 0.5f), new Vector3(9.2f, 0.03f, spanLength), surface);
-        CreatePrimitive("CrackCore", PrimitiveType.Cube, visual, new Vector3(0f, 0.03f, spanLength * 0.5f), new Vector3(finalStyle ? 0.6f : 0.45f, 0.06f, spanLength - 0.3f), surface);
+        Material edge = fractureEdgeMaterial;
         CreatePrimitive("NearLip", PrimitiveType.Cube, visual, new Vector3(0f, 0.04f, 0.05f), new Vector3(9.2f, 0.12f, 0.12f), edge);
         CreatePrimitive("FarLip", PrimitiveType.Cube, visual, new Vector3(0f, 0.04f, spanLength - 0.05f), new Vector3(9.2f, 0.12f, 0.12f), edge);
         CreatePrimitive("LeftEdge", PrimitiveType.Cube, visual, new Vector3(-4.55f, 0.05f, spanLength * 0.5f), new Vector3(0.10f, 0.10f, spanLength), edge);
         CreatePrimitive("RightEdge", PrimitiveType.Cube, visual, new Vector3(4.55f, 0.05f, spanLength * 0.5f), new Vector3(0.10f, 0.10f, spanLength), edge);
-
-        for (int i = 0; i < 4; i++)
-        {
-            float crackZ = 0.65f + i * 0.85f;
-            CreatePrimitive("Crack Mark " + (i + 1), PrimitiveType.Cube, visual, new Vector3(0f, 0.07f, crackZ), new Vector3(8.8f, 0.025f, 0.07f), edge);
-        }
 
         Transform telegraph = new GameObject("Telegraph").transform;
         telegraph.SetParent(root.transform, false);
@@ -630,7 +679,7 @@ public static class BuildLevel5FractureRelay
         SetFloat(hazard, "stopperWidth", 9.2f);
         SetFloat(hazard, "stopperHeight", 1.15f);
         SetFloat(hazard, "stopperDepth", 0.25f);
-        SetFloat(hazard, "warningDistance", 10f);
+        SetFloat(hazard, "warningDistance", 20f);
         SetInt(hazard, "failedLossCap", 10);
         SetFloat(hazard, "failedLossPercent", 0.15f);
         SetInt(hazard, "leadStopperLayer", playerOnlyLayer);
@@ -661,6 +710,8 @@ public static class BuildLevel5FractureRelay
                 SetFloat(hazard, "farEdgeClearance", 0.15f);
                 SetFloat(hazard, "runnerLandingTolerance", 0.05f);
                 SetInt(hazard, "leadStopperLayer", playerOnlyLayer);
+                SetFloat(hazard, "warningDistance", 20f);
+
             }
 
             Transform stopper = root.transform.Find("LeadStopper");
@@ -676,28 +727,10 @@ public static class BuildLevel5FractureRelay
             Transform visual = root.transform.Find("Visual");
             if (visual != null)
             {
-                Transform bed = visual.Find("CrackBed");
-                if (bed != null)
-                {
-                    bed.localPosition = new Vector3(0f, -2.5f, spanLength * 0.5f);
-                    bed.localScale = new Vector3(9.2f, bed.localScale.y, spanLength);
-                }
+                visual.localPosition = Vector3.zero;
+                visual.localRotation = Quaternion.identity;
+                visual.localScale = Vector3.one;
 
-                Transform core = visual.Find("CrackCore");
-                if (core != null)
-                {
-                    core.localPosition = new Vector3(0f, -2.35f, spanLength * 0.5f);
-                    core.localScale = new Vector3(core.localScale.x, core.localScale.y, Mathf.Max(0.2f, spanLength - 0.3f));
-                }
-
-                for (int i = 0; i < 4; i++)
-                {
-                    Transform mark = visual.Find("Crack Mark " + (i + 1));
-                    if (mark != null)
-                    {
-                        mark.localPosition = new Vector3(mark.localPosition.x, -2.2f, mark.localPosition.z);
-                    }
-                }
             }
 
             // Visual primitives are not allowed to provide an accidental floor;

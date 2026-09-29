@@ -19,6 +19,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float coyoteTime = 0.15f;
     [SerializeField] private float jumpBufferTime = 0.1f;
     [SerializeField, Range(0.05f, 1f)] private float jumpReleaseVelocityMultiplier = 0.35f;
+    [SerializeField, Range(0.1f, 0.6f)] private float touchDoubleTapWindow = 0.3f;
 
     // Public properties to sync physics with PlayerCrowdManager
     public float ForwardSpeed => GetForwardSpeed();
@@ -39,6 +40,7 @@ public class PlayerController : MonoBehaviour
     private Vector3 velocity;
     private float coyoteTimer;
     private float jumpBufferTimer;
+    private float touchDoubleTapTimer;
     private bool jumpCutApplied;
 
     // Input System references
@@ -98,7 +100,7 @@ public class PlayerController : MonoBehaviour
         if (isFighting)
         {
             // Slow down forward speed during combat to make it look like a struggle
-            currentForwardSpeed = forwardSpeed * 0.25f;
+            currentForwardSpeed = crowdManager.IsBossFightActive ? 0f : currentForwardSpeed * 0.25f;
 
             // Lock controls and pull player towards target enemy center on X axis
             float targetX = crowdManager.EnemyTargetX;
@@ -149,6 +151,11 @@ public class PlayerController : MonoBehaviour
 
     private void HandleJumping()
     {
+        if (touchDoubleTapTimer > 0f)
+        {
+            touchDoubleTapTimer -= Time.deltaTime;
+        }
+
         // Coyote time — allow a short grace period after leaving ground
         if (controller.isGrounded)
         {
@@ -159,11 +166,22 @@ public class PlayerController : MonoBehaviour
             coyoteTimer -= Time.deltaTime;
         }
 
-        // Jump buffer — queue a jump if pressed slightly before landing
+        // Jump buffer — queue a jump if pressed slightly before landing.
+        // Touch uses a double-tap so a steering drag does not jump on its first touch.
         bool jumpPressed = keyboard != null && keyboard.spaceKey.wasPressedThisFrame;
+        bool touchJumpPressed = false;
         if (touchscreen != null && touchscreen.primaryTouch.press.wasPressedThisFrame)
         {
-            jumpPressed = true;
+            if (touchDoubleTapTimer > 0f)
+            {
+                jumpPressed = true;
+                touchJumpPressed = true;
+                touchDoubleTapTimer = 0f;
+            }
+            else
+            {
+                touchDoubleTapTimer = touchDoubleTapWindow;
+            }
         }
 
         if (jumpPressed)
@@ -181,16 +199,20 @@ public class PlayerController : MonoBehaviour
             velocity.y = jumpForce;
             coyoteTimer = 0f;
             jumpBufferTimer = 0f;
-            jumpCutApplied = false;
+            // Touch jumps use the full arc; desktop jumps can still be shortened
+            // by releasing Space early.
+            jumpCutApplied = touchJumpPressed;
         }
 
-        // Releasing jump early cuts the upward velocity. Holding Space preserves
-        // the full arc needed to clear the physical Level 5 road gap.
-        bool jumpHeld = (keyboard != null && keyboard.spaceKey.isPressed) ||
-            (touchscreen != null && touchscreen.primaryTouch.press.isPressed);
+        // Releasing Space early cuts the desktop jump. Touch double-tap jumps are
+        // release-independent so a second tap does not require a held finger.
+        bool jumpHeld = keyboard != null && keyboard.spaceKey.isPressed;
         if (controller.isGrounded)
         {
-            jumpCutApplied = false;
+            if (!touchJumpPressed)
+            {
+                jumpCutApplied = false;
+            }
         }
         else if (!jumpHeld && !jumpCutApplied && velocity.y > 0f)
         {

@@ -10,6 +10,10 @@ public class PlayerCrowdManager : MonoBehaviour
     [SerializeField] private float lerpSpeed = 7f;
     [SerializeField] private int poolSize = 200;
 
+    [Header("Default Skin Crowd Color Override")]
+    [SerializeField] private bool useCrowdTintOverride;
+    [SerializeField] private Color crowdTintOverrideColor = new Color(0.34f, 0.62f, 0.95f, 1f);
+
     [Header("Crowd Representation")]
     [SerializeField, Min(1)] private int oneToOneLimit = 60;
     [SerializeField, Min(61)] private int compressionEndLogicalCount = 200;
@@ -22,11 +26,27 @@ public class PlayerCrowdManager : MonoBehaviour
 
     private List<GameObject> runnerPool = new List<GameObject>();
     private List<GameObject> activeRunners = new List<GameObject>();
+    private readonly List<Renderer> crowdTintRendererBuffer = new List<Renderer>(4);
+    private MaterialPropertyBlock crowdTintPropertyBlock;
+    private static readonly int BaseColorPropertyId = Shader.PropertyToID("_BaseColor");
+    private static readonly int LegacyColorPropertyId = Shader.PropertyToID("_Color");
+    private readonly Dictionary<GameObject, uint> runnerActivations = new Dictionary<GameObject, uint>(501);
+    private uint nextRunnerActivation;
+
+    public uint GetRunnerActivation(GameObject runner)
+    {
+        return runner != null && runnerActivations.TryGetValue(runner, out uint activation) ? activation : 0;
+    }
     private List<GameObject> fallingRunners = new List<GameObject>();
     private Dictionary<GameObject, float> runnerSpawnTimes = new Dictionary<GameObject, float>();
     private Dictionary<GameObject, float> fallingRunnerVelocities = new Dictionary<GameObject, float>();
     private Dictionary<GameObject, int> edgeFrameCounters = new Dictionary<GameObject, int>(); // Consecutive frames a clone is detected off-edge
     private RuntimeAnimatorController cachedAnimatorController;
+    private Avatar cachedAnimatorAvatar;
+    private static SkinAvatarCatalog cachedSkinAvatarCatalog;
+    private static bool hasLoadedSkinAvatarCatalog;
+    private const string SkinAvatarCatalogResourcePath = "SkinAvatarCatalog";
+    private const string EquippedSkinVisualPrefix = "EquippedSkinVisual_";
     private RaycastHit[] raycastResults = new RaycastHit[64];     // Large Raycast results cache
     private bool isStickmanAnimator;                              // Cached name check result
     private float leftLimit = -2.5f;                              // Dynamic track left boundary
@@ -84,18 +104,44 @@ public class PlayerCrowdManager : MonoBehaviour
     private Collider[] overlapResults = new Collider[32];
     private bool hasTriggeredGameOver = false;
     private bool hasTriggeredLeadFallGameOver = false;
+    [SerializeField] private SfxPlayer sfxPlayer;
     private float gameActiveTimer = 0f;                        // Time elapsed since game became active
     private const float GAME_OVER_GRACE_PERIOD = 1.5f;        // Seconds after game starts before game over can trigger
     private float lastGroundedY = 0f;                          // Tracks the last Y coordinate where the player was grounded
 
-    public bool IsFighting => isFighting;
-    public float EnemyTargetX => enemyTargetX;
+    private bool bossFightActive;
+    private float bossFightTargetX;
+
+    public bool IsFighting => isFighting || bossFightActive;
+    public bool IsBossFightActive => bossFightActive;
+    public float EnemyTargetX => bossFightActive ? bossFightTargetX : enemyTargetX;
     public bool IsGameOver => hasTriggeredGameOver;
     public bool IsLeadFallGameOver => hasTriggeredLeadFallGameOver;
     public List<GameObject> ActiveRunners => activeRunners;
     public int LogicalRunnerCount { get; private set; }
     public int VisualRunnerCount => activeRunners.Count;
     public int ActiveRunnerCount => LogicalRunnerCount;
+
+    public void PlayCoinPickupSfx()
+    {
+        sfxPlayer?.PlayCoinPickup();
+    }
+
+    public void PlayTankShotSfx()
+    {
+        sfxPlayer?.PlayTankShot();
+    }
+
+    public void BeginBossFight(float targetX)
+    {
+        bossFightTargetX = targetX;
+        bossFightActive = true;
+    }
+
+    public void EndBossFight()
+    {
+        bossFightActive = false;
+    }
 
 
     private void OnValidate()
@@ -131,6 +177,8 @@ public class PlayerCrowdManager : MonoBehaviour
 
         CountBadge.Attach(transform, () => ActiveRunnerCount, CountBadge.PlayerBlue, heightAbove: 2.2f);
 
+        ApplyEquippedSkinToCrowd(SkinShopController.EquippedSkinId);
+        ApplyCrowdTint(runnerPrefab);
         InitializePool();
         InitializeLeadPlayer();
         LogicalRunnerCount = activeRunners.Count;
@@ -258,9 +306,310 @@ public class PlayerCrowdManager : MonoBehaviour
             Destroy(cc);
         }
 
+        SkinShopController.ApplyEquippedSkin(obj);
+        ApplyCrowdTint(obj);
         obj.SetActive(false);
         runnerPool.Add(obj);
         return obj;
+    }
+
+    private void ApplyCrowdTint(GameObject runner)
+    {
+        if (!useCrowdTintOverride || runner == null)
+        {
+            return;
+        }
+
+        // Keep the selected avatar model on the same authored blue tint as the default skin.
+
+        if (crowdTintPropertyBlock == null)
+        {
+            crowdTintPropertyBlock = new MaterialPropertyBlock();
+        }
+
+        crowdTintRendererBuffer.Clear();
+        runner.GetComponentsInChildren(true, crowdTintRendererBuffer);
+        for (int i = 0; i < crowdTintRendererBuffer.Count; i++)
+        {
+            Renderer renderer = crowdTintRendererBuffer[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            renderer.GetPropertyBlock(crowdTintPropertyBlock);
+            crowdTintPropertyBlock.SetColor(BaseColorPropertyId, crowdTintOverrideColor);
+            crowdTintPropertyBlock.SetColor(LegacyColorPropertyId, crowdTintOverrideColor);
+            renderer.SetPropertyBlock(crowdTintPropertyBlock);
+        }
+        crowdTintRendererBuffer.Clear();
+    }
+
+    public static void ApplyEquippedSkinToActiveCrowds(int skinId)
+    {
+        PlayerCrowdManager[] managers = FindObjectsByType<PlayerCrowdManager>(FindObjectsSortMode.None);
+        for (int i = 0; i < managers.Length; i++)
+        {
+            if (managers[i] != null)
+            {
+                managers[i].ApplyEquippedSkinToCrowd(skinId);
+            }
+        }
+    }
+
+    private void ApplyEquippedSkinToCrowd(int skinId)
+    {
+        if (runnerPrefab == null)
+        {
+            return;
+        }
+
+        skinId = Mathf.Clamp(skinId, 0, SkinAvatarCatalog.SkinCount - 1);
+        Animator playerAnimator = GetComponent<Animator>();
+        RuntimeAnimatorController controller = playerAnimator != null
+            ? playerAnimator.runtimeAnimatorController
+            : cachedAnimatorController;
+
+        ApplyEquippedSkinToRunner(runnerPrefab, skinId, controller);
+        ApplyCrowdTint(runnerPrefab);
+
+        for (int i = 0; i < runnerPool.Count; i++)
+        {
+            GameObject runner = runnerPool[i];
+            if (runner == null)
+            {
+                continue;
+            }
+
+            ApplyEquippedSkinToRunner(runner, skinId, controller);
+            ApplyCrowdTint(runner);
+        }
+
+        if (activeRunners.Count > 0 && activeRunners[0] != null)
+        {
+            Animator leadAnimator = GetRunnerAnimator(activeRunners[0]);
+            if (leadAnimator != null)
+            {
+                for (int i = 0; i < activeRunners.Count; i++)
+                {
+                    GameObject runner = activeRunners[i];
+                    if (runner == null || runner == activeRunners[0])
+                    {
+                        continue;
+                    }
+
+                    SyncAnimatorState(GetRunnerAnimator(runner), leadAnimator);
+                }
+            }
+        }
+    }
+
+    public static void ApplyEquippedSkinToRunner(GameObject runner, int skinId, RuntimeAnimatorController animatorController = null)
+    {
+        if (runner == null)
+        {
+            return;
+        }
+
+        skinId = Mathf.Clamp(skinId, 0, SkinAvatarCatalog.SkinCount - 1);
+        // Skin 00 uses the original runner already present on the prefab.
+        if (skinId == 0)
+        {
+            RestoreDefaultRunnerAppearance(runner);
+            return;
+        }
+
+        SkinAvatarCatalog catalog = GetSkinAvatarCatalog();
+        if (catalog == null)
+        {
+            Debug.LogError("PlayerCrowdManager: Resources/SkinAvatarCatalog is missing; full model skins cannot be applied.", runner);
+            return;
+        }
+
+        GameObject modelPrefab = catalog.GetModel(skinId);
+        if (modelPrefab == null)
+        {
+            Debug.LogError("PlayerCrowdManager: SkinAvatarCatalog has no model assigned for skin ID " + skinId + ".", catalog);
+            return;
+        }
+
+        Animator modelPrefabAnimator = modelPrefab.GetComponentInChildren<Animator>(true);
+        if (modelPrefabAnimator == null || modelPrefabAnimator.avatar == null || !modelPrefabAnimator.avatar.isValid || !modelPrefabAnimator.avatar.isHuman)
+        {
+            Debug.LogError("PlayerCrowdManager: Skin " + skinId + " must contain a valid Humanoid Animator avatar.", modelPrefab);
+            return;
+        }
+
+        string expectedName = EquippedSkinVisualPrefix + skinId.ToString("00");
+        Transform existingVisual = FindEquippedSkinVisual(runner);
+        if (existingVisual != null && existingVisual.name == expectedName)
+        {
+            ConfigureSkinAnimator(existingVisual, animatorController);
+            return;
+        }
+
+        RuntimeAnimatorController controller = animatorController;
+        if (controller == null)
+        {
+            Animator sourceAnimator = runner.GetComponent<Animator>();
+            if (sourceAnimator == null)
+            {
+                sourceAnimator = runner.GetComponentInChildren<Animator>(true);
+            }
+            controller = sourceAnimator != null ? sourceAnimator.runtimeAnimatorController : null;
+        }
+
+        Renderer[] existingRenderers = runner.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < existingRenderers.Length; i++)
+        {
+            if (existingRenderers[i] != null)
+            {
+                existingRenderers[i].enabled = false;
+            }
+        }
+
+        Animator[] existingAnimators = runner.GetComponentsInChildren<Animator>(true);
+        for (int i = 0; i < existingAnimators.Length; i++)
+        {
+            if (existingAnimators[i] != null)
+            {
+                existingAnimators[i].enabled = false;
+            }
+        }
+
+        for (int i = runner.transform.childCount - 1; i >= 0; i--)
+        {
+            Transform child = runner.transform.GetChild(i);
+            if (child.name.StartsWith(EquippedSkinVisualPrefix, StringComparison.Ordinal))
+            {
+                child.gameObject.SetActive(false);
+                Destroy(child.gameObject);
+            }
+        }
+
+        GameObject visual = Instantiate(modelPrefab, runner.transform, false);
+        visual.name = expectedName;
+        visual.transform.localPosition = Vector3.zero;
+        visual.transform.localRotation = Quaternion.identity;
+        visual.transform.localScale = Vector3.one;
+        ConfigureSkinAnimator(visual.transform, controller);
+    }
+
+    private static void RestoreDefaultRunnerAppearance(GameObject runner)
+    {
+        for (int i = runner.transform.childCount - 1; i >= 0; i--)
+        {
+            Transform child = runner.transform.GetChild(i);
+            if (child.name.StartsWith(EquippedSkinVisualPrefix, StringComparison.Ordinal))
+            {
+                child.gameObject.SetActive(false);
+                Destroy(child.gameObject);
+            }
+        }
+
+        Renderer[] renderers = runner.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] != null && !IsInsideEquippedSkinVisual(runner.transform, renderers[i].transform))
+            {
+                renderers[i].enabled = true;
+            }
+        }
+
+        Animator[] animators = runner.GetComponentsInChildren<Animator>(true);
+        for (int i = 0; i < animators.Length; i++)
+        {
+            if (animators[i] != null && !IsInsideEquippedSkinVisual(runner.transform, animators[i].transform))
+            {
+                animators[i].enabled = true;
+            }
+        }
+    }
+
+    private static bool IsInsideEquippedSkinVisual(Transform runnerRoot, Transform candidate)
+    {
+        for (Transform current = candidate; current != null && current != runnerRoot; current = current.parent)
+        {
+            if (current.name.StartsWith(EquippedSkinVisualPrefix, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void ConfigureSkinAnimator(Transform visual, RuntimeAnimatorController animatorController)
+    {
+        if (visual == null)
+        {
+            return;
+        }
+
+        Animator animator = visual.GetComponentInChildren<Animator>(true);
+        if (animator == null)
+        {
+            return;
+        }
+
+        if (animatorController != null)
+        {
+            animator.runtimeAnimatorController = animatorController;
+        }
+
+        animator.applyRootMotion = false;
+        animator.enabled = true;
+        if (animator.gameObject.activeInHierarchy)
+        {
+            animator.Rebind();
+            animator.Update(0f);
+        }
+    }
+
+    private static SkinAvatarCatalog GetSkinAvatarCatalog()
+    {
+        if (!hasLoadedSkinAvatarCatalog)
+        {
+            cachedSkinAvatarCatalog = Resources.Load<SkinAvatarCatalog>(SkinAvatarCatalogResourcePath);
+            hasLoadedSkinAvatarCatalog = true;
+        }
+
+        return cachedSkinAvatarCatalog;
+    }
+
+    private static Transform FindEquippedSkinVisual(GameObject runner)
+    {
+        if (runner == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < runner.transform.childCount; i++)
+        {
+            Transform child = runner.transform.GetChild(i);
+            if (child.gameObject.activeSelf && child.name.StartsWith(EquippedSkinVisualPrefix, StringComparison.Ordinal))
+            {
+                return child;
+            }
+        }
+
+        return null;
+    }
+
+    private static Animator GetRunnerAnimator(GameObject runner)
+    {
+        Transform visual = FindEquippedSkinVisual(runner);
+        return visual != null
+            ? visual.GetComponentInChildren<Animator>(true)
+            : runner != null ? runner.GetComponentInChildren<Animator>(true) : null;
+    }
+
+    private static SkinnedMeshRenderer GetRunnerRenderer(GameObject runner)
+    {
+        Transform visual = FindEquippedSkinVisual(runner);
+        return visual != null
+            ? visual.GetComponentInChildren<SkinnedMeshRenderer>(true)
+            : runner != null ? runner.GetComponentInChildren<SkinnedMeshRenderer>(true) : null;
     }
 
     private void InitializePool()
@@ -279,6 +628,7 @@ public class PlayerCrowdManager : MonoBehaviour
         if (rootAnim != null && rootAnim.runtimeAnimatorController != null)
         {
             cachedAnimatorController = rootAnim.runtimeAnimatorController;
+            cachedAnimatorAvatar = rootAnim.avatar;
             isStickmanAnimator = cachedAnimatorController.name.Contains("Stickman");
         }
 
@@ -289,17 +639,25 @@ public class PlayerCrowdManager : MonoBehaviour
                 continue;
             }
 
-            if (child.GetComponentInChildren<SkinnedMeshRenderer>() != null && !child.name.Contains("Camera"))
+            if (GetRunnerRenderer(child.gameObject) != null && !child.name.Contains("Camera"))
             {
                 activeRunners.Add(child.gameObject);
+                runnerActivations[child.gameObject] = ++nextRunnerActivation;
                 runnerSpawnTimes[child.gameObject] = Time.time;
 
-                if (cachedAnimatorController == null)
+                if (cachedAnimatorController == null || cachedAnimatorAvatar == null)
                 {
-                    Animator startingAnim = child.GetComponentInChildren<Animator>();
+                    Animator startingAnim = GetRunnerAnimator(child.gameObject);
                     if (startingAnim != null)
                     {
-                        cachedAnimatorController = startingAnim.runtimeAnimatorController;
+                        if (cachedAnimatorController == null)
+                        {
+                            cachedAnimatorController = startingAnim.runtimeAnimatorController;
+                        }
+                        if (cachedAnimatorAvatar == null)
+                        {
+                            cachedAnimatorAvatar = startingAnim.avatar;
+                        }
                         if (cachedAnimatorController != null)
                         {
                             isStickmanAnimator = cachedAnimatorController.name.Contains("Stickman");
@@ -343,6 +701,7 @@ public class PlayerCrowdManager : MonoBehaviour
             {
                 hasTriggeredGameOver = true;
                 hasTriggeredLeadFallGameOver = true;
+                sfxPlayer?.PlayGameOver();
                 if (UIManager.Instance != null)
                 {
                     UIManager.Instance.TriggerLeadFallGameOver(activeRunners.Count > 0 ? activeRunners[0].transform : transform);
@@ -353,6 +712,7 @@ public class PlayerCrowdManager : MonoBehaviour
             if (LogicalRunnerCount == 0)
             {
                 hasTriggeredGameOver = true;
+                sfxPlayer?.PlayGameOver();
                 if (UIManager.Instance != null)
                 {
                     UIManager.Instance.ShowGameOver(0);
@@ -512,7 +872,7 @@ public class PlayerCrowdManager : MonoBehaviour
     {
         if (activeRunners.Count == 0 || activeRunners[0] == null) return;
 
-        Animator leadAnim = activeRunners[0].GetComponentInChildren<Animator>();
+        Animator leadAnim = GetRunnerAnimator(activeRunners[0]);
         if (leadAnim == null) return;
 
         CharacterController cc = GetComponent<CharacterController>();
@@ -632,10 +992,9 @@ public class PlayerCrowdManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Evaluates actual world-space runner positions during the shared lead jump.
-    /// Vertical reach is predicted from the lead's current CharacterController
-    /// trajectory; only runners that enter the gap and cannot clear its far lip are
-    /// transferred once to the existing pooled falling-runner path.
+    /// Evaluates non-lead runners from actual world-space positions and the shared
+    /// lead trajectory. It records failure only after a runner drops below the road;
+    /// far-edge clearance or a grounded landing resolves a successful crossing.
     /// </summary>
     public int ProcessRoadGap(
         int sessionId,
@@ -655,10 +1014,7 @@ public class PlayerCrowdManager : MonoBehaviour
         float surfaceY = roadSurfaceY;
         float clearance = Mathf.Max(0f, farEdgeClearance);
         float tolerance = Mathf.Max(0f, landingTolerance);
-        float forwardSpeed = playerController != null ? playerController.ForwardSpeed : 6f;
         float verticalVelocity = playerController != null ? playerController.VerticalVelocity : -2f;
-        float gravity = playerController != null ? playerController.Gravity : -20f;
-        forwardSpeed = Mathf.Max(0.1f, forwardSpeed);
 
         int fallenCount = 0;
         // Iterate the stable session identity map instead of activeRunners. A failed
@@ -684,17 +1040,10 @@ public class PlayerCrowdManager : MonoBehaviour
 
             if (currentPosition.z < endZ)
             {
-                bool canReachFarEdge = PredictFarEdgeHeight(
-                    currentPosition,
-                    endZ,
-                    surfaceY,
-                    clearance,
-                    forwardSpeed,
-                    verticalVelocity,
-                    gravity);
-
+                // A grounded runner can still follow the lead's jump over the far lip.
+                // Defer failure until its actual position drops below the road.
                 bool belowRoad = currentPosition.y < surfaceY - tolerance;
-                if (!canReachFarEdge || belowRoad)
+                if (belowRoad)
                 {
                     if (MarkRoadGapState(record, RoadGapRunnerState.Failed))
                     {
@@ -705,10 +1054,10 @@ public class PlayerCrowdManager : MonoBehaviour
 
                 continue;
             }
-
             float farEdgeY = GetCrossingHeight(previousPosition, currentPosition, endZ);
             bool crossedWithClearance = farEdgeY >= surfaceY + clearance;
-            bool landedBeyondLip = currentPosition.z >= endZ + 0.25f &&
+            // A physics step can cross the lip by less than 0.25m.
+            bool landedBeyondLip = currentPosition.z >= endZ &&
                 currentPosition.y >= surfaceY - tolerance &&
                 verticalVelocity <= 0f;
 
@@ -748,22 +1097,6 @@ public class PlayerCrowdManager : MonoBehaviour
             0.05f);
     }
 
-    private bool PredictFarEdgeHeight(
-        Vector3 currentPosition,
-        float farEdgeZ,
-        float roadSurfaceY,
-        float farEdgeClearance,
-        float forwardSpeed,
-        float verticalVelocity,
-        float gravity)
-    {
-        float distanceToFarEdge = Mathf.Max(0f, farEdgeZ - currentPosition.z);
-        float timeToFarEdge = distanceToFarEdge / forwardSpeed;
-        float predictedHeight = currentPosition.y +
-            verticalVelocity * timeToFarEdge +
-            0.5f * gravity * timeToFarEdge * timeToFarEdge;
-        return predictedHeight >= roadSurfaceY + farEdgeClearance;
-    }
 
     private static float GetCrossingHeight(Vector3 previousPosition, Vector3 currentPosition, float crossingZ)
     {
@@ -821,13 +1154,16 @@ public class PlayerCrowdManager : MonoBehaviour
     {
         if (amount <= 0) return;
 
+        int previousCount = LogicalRunnerCount;
         long targetCount = (long)LogicalRunnerCount + amount;
         LogicalRunnerCount = targetCount > int.MaxValue ? int.MaxValue : (int)targetCount;
         SyncVisualCrowdToLogicalCount();
+        if (LogicalRunnerCount > previousCount) sfxPlayer?.PlayCrowdGrowth();
     }
 
     public void MultiplyLogicalRunners(int factor)
     {
+        int previousCount = LogicalRunnerCount;
         if (factor <= 0)
         {
             LogicalRunnerCount = 0;
@@ -839,6 +1175,7 @@ public class PlayerCrowdManager : MonoBehaviour
         }
 
         SyncVisualCrowdToLogicalCount();
+        if (LogicalRunnerCount > previousCount) sfxPlayer?.PlayCrowdGrowth();
     }
 
     public void RemoveLogicalRunners(int amount)
@@ -854,6 +1191,7 @@ public class PlayerCrowdManager : MonoBehaviour
     {
         if (amount <= 0 || LogicalRunnerCount <= 0) return;
 
+        sfxPlayer?.PlayCrowdLoss();
         LogicalRunnerCount = Mathf.Max(0, LogicalRunnerCount - amount);
         SyncVisualCrowdToLogicalCount(allowVisualReplenish || LogicalRunnerCount <= oneToOneLimit);
         if (checkGameOver)
@@ -870,6 +1208,7 @@ public class PlayerCrowdManager : MonoBehaviour
         }
 
         hasTriggeredGameOver = true;
+        sfxPlayer?.PlayGameOver();
         if (UIManager.Instance != null)
         {
             UIManager.Instance.ShowGameOver(0);
@@ -950,13 +1289,19 @@ public class PlayerCrowdManager : MonoBehaviour
         runner.transform.localRotation = Quaternion.identity;
         runner.SetActive(true);
 
-        Animator anim = runner.GetComponentInChildren<Animator>();
+        Animator anim = GetRunnerAnimator(runner);
         if (anim != null && cachedAnimatorController != null)
         {
             anim.runtimeAnimatorController = cachedAnimatorController;
+            if (FindEquippedSkinVisual(runner) == null && cachedAnimatorAvatar != null)
+            {
+                anim.avatar = cachedAnimatorAvatar;
+            }
+            anim.Rebind();
+            anim.Update(0f);
             if (activeRunners.Count > 0 && activeRunners[0] != null)
             {
-                Animator leadAnim = activeRunners[0].GetComponentInChildren<Animator>();
+                Animator leadAnim = GetRunnerAnimator(activeRunners[0]);
                 if (leadAnim != null)
                 {
                     SyncAnimatorState(anim, leadAnim);
@@ -964,17 +1309,11 @@ public class PlayerCrowdManager : MonoBehaviour
             }
         }
 
-        if (activeRunners.Count > 0 && activeRunners[0] != null)
-        {
-            SkinnedMeshRenderer leadRenderer = activeRunners[0].GetComponentInChildren<SkinnedMeshRenderer>();
-            SkinnedMeshRenderer newRenderer = runner.GetComponentInChildren<SkinnedMeshRenderer>();
-            if (leadRenderer != null && newRenderer != null)
-            {
-                newRenderer.sharedMaterial = leadRenderer.sharedMaterial;
-            }
-        }
-
+        // Preserve imported materials and apply the shared blue tint per renderer to every equipped skin.
+        SkinShopController.ApplyEquippedSkin(runner);
+        ApplyCrowdTint(runner);
         activeRunners.Add(runner);
+        runnerActivations[runner] = ++nextRunnerActivation;
         runnerSpawnTimes[runner] = Time.time;
         edgeFrameCounters[runner] = 0;
     }
@@ -998,7 +1337,12 @@ public class PlayerCrowdManager : MonoBehaviour
             return;
         }
 
-        TryPlayAnimationState(targetAnim, "Fast Run", stateInfo.normalizedTime);
+        if (TryPlayAnimationState(targetAnim, "Fast Run", stateInfo.normalizedTime))
+        {
+            return;
+        }
+
+        TryPlayAnimationState(targetAnim, "Running", stateInfo.normalizedTime);
     }
 
     private bool TryPlayAnimationState(Animator anim, string stateName, float normalizedTime = 0f)
@@ -1036,9 +1380,20 @@ public class PlayerCrowdManager : MonoBehaviour
         }
 
         int logicalLoss = GetLogicalLossForVisualRunner();
-        DeathPopEffect.Create(effectPosition, effectColor);
         DeactivateVisualRunner(visualRunner);
         ApplyLogicalLoss(logicalLoss, false);
+
+        // Removing a runner and its rounded logical share is gameplay state; the
+        // death pop is optional presentation and must not interrupt that commit.
+        try
+        {
+            DeathPopEffect.Create(effectPosition, effectColor);
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning("PlayerCrowdManager: death effect failed during hazard removal: " + exception.Message, this);
+        }
+
         return true;
     }
 
@@ -1092,7 +1447,7 @@ public class PlayerCrowdManager : MonoBehaviour
 
     private Color GetRunnerColor(GameObject runner, Color fallback)
     {
-        Renderer renderer = runner != null ? runner.GetComponentInChildren<Renderer>() : null;
+        Renderer renderer = GetRunnerRenderer(runner);
         if (renderer != null && renderer.sharedMaterial != null)
         {
             if (renderer.sharedMaterial.HasProperty("_Color"))
@@ -1130,7 +1485,7 @@ public class PlayerCrowdManager : MonoBehaviour
     {
         if (activeRunners.Count > 0 && activeRunners[0] != null)
         {
-            return activeRunners[0].GetComponentInChildren<Animator>();
+            return GetRunnerAnimator(activeRunners[0]);
         }
         return null;
     }
@@ -1147,7 +1502,7 @@ public class PlayerCrowdManager : MonoBehaviour
         fallingRunners.Add(runner);
         fallingRunnerVelocities[runner] = -2f;
 
-        Animator cloneAnim = runner.GetComponentInChildren<Animator>();
+        Animator cloneAnim = GetRunnerAnimator(runner);
         if (cloneAnim != null)
         {
             if (!TryPlayAnimationState(cloneAnim, "Falling"))
@@ -1163,6 +1518,7 @@ public class PlayerCrowdManager : MonoBehaviour
         if (UIManager.IsGameActive && !hasTriggeredGameOver && gameActiveTimer > GAME_OVER_GRACE_PERIOD && LogicalRunnerCount == 0)
         {
             hasTriggeredGameOver = true;
+            sfxPlayer?.PlayGameOver();
             if (UIManager.Instance != null)
             {
                 UIManager.Instance.TriggerLeadFallGameOver(runner.transform);

@@ -9,8 +9,8 @@ public static class Level1Section2Builder
     private const string ScenePath = "Assets/Scenes/Level1.unity";
     private const string LevelRootName = "Level 1 - Multiplier Ramp-Up";
     private const string SectionName = "Section 2 - The Sawmill Bottleneck";
-    private const string ConeModelPath = "Assets/Models/Objects/Cone.fbx";
-    private const string SawModelPath = "Assets/Models/Objects/Circular Saw.fbx";
+    private const string ConeModelPath = "Assets/Models/Assets/Clash Masters/Models/Objects/Cone.fbx";
+    private const string SawModelPath = "Assets/Models/Assets/Clash Masters/Models/Objects/Circular Saw.fbx";
 
     static Level1Section2Builder()
     {
@@ -91,6 +91,8 @@ public static class Level1Section2Builder
         CreateSaw(saws.transform, "Saw Trap 1 Z62", 62f);
         CreateSaw(saws.transform, "Saw Trap 2 Z72", 72f);
 
+        LevelEnemyEncounterAuthoring.RebuildForLevel(levelRoot, 1);
+
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
         Debug.Log("Level1Section2Builder: Added Section 2 - The Sawmill Bottleneck to Level1 using object model assets.");
@@ -149,11 +151,9 @@ public static class Level1Section2Builder
         serializedSaw.FindProperty("moveSpeed").floatValue = 3f;
         serializedSaw.FindProperty("spinSpeed").floatValue = 720f;
         serializedSaw.FindProperty("killRadius").floatValue = 0.85f;
-        serializedSaw.FindProperty("runnerHitRadius").floatValue = 0.35f;
         serializedSaw.FindProperty("useExplicitXLimits").boolValue = true;
         serializedSaw.FindProperty("leftLimitOverride").floatValue = -2f;
         serializedSaw.FindProperty("rightLimitOverride").floatValue = 2f;
-        serializedSaw.FindProperty("useSineMotion").boolValue = true;
         serializedSaw.ApplyModifiedPropertiesWithoutUndo();
 
         GameObject blade = InstantiateModelVisual(SawModelPath, "Blade", saw.transform);

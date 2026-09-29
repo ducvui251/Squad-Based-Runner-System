@@ -561,6 +561,9 @@ PlayerSettings:
   - serializedVersion: 3
     m_BuildTarget: Android
     m_Formats: 03000000
+  - serializedVersion: 3
+    m_BuildTarget: WebGL
+    m_Formats: 05000000
   playModeTestRunnerEnabled: 0
   runPlayModeTestAsEditModeTest: 0
   actionOnDotNetUnhandledException: 1
@@ -827,8 +830,25 @@ PlayerSettings:
   webWasm2023: 0
   webEnableSubmoduleStrippingCompatibility: 0
   scriptingDefineSymbols:
-    Standalone: SENTIS_ANALYTICS_ENABLED;APP_UI_EDITOR_ONLY
-    WebGL: SENTIS_ANALYTICS_ENABLED;APP_UI_EDITOR_ONLY
+    Android: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    EmbeddedLinux: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    GameCoreScarlett: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    GameCoreXboxOne: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    Kepler: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    LinuxHeadlessSimulation: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    Nintendo Switch: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    Nintendo Switch 2: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    PS4: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    PS5: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    QNX: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    Server: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    Standalone: SENTIS_ANALYTICS_ENABLED;APP_UI_EDITOR_ONLY;UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    VisionOS: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    WebGL: SENTIS_ANALYTICS_ENABLED;APP_UI_EDITOR_ONLY;UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    Windows Store Apps: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    XboxOne: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    iPhone: UNITY_MCP_READY;UNITY_MCP_DEPS_3
+    tvOS: UNITY_MCP_READY;UNITY_MCP_DEPS_3
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend:
@@ -937,7 +957,7 @@ PlayerSettings:
   hmiLoadingImage: {fileID: 0}
   platformRequiresReadableAssets: 0
   virtualTexturingSupportEnabled: 0
-  insecureHttpOption: 0
+  insecureHttpOption: 1
   androidVulkanDenyFilterList: []
   androidVulkanAllowFilterList: []
   androidVulkanDeviceFilterListAsset: {fileID: 0}

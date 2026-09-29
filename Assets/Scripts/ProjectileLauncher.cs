@@ -8,6 +8,8 @@ using UnityEngine;
 /// </summary>
 public class ProjectileLauncher : MonoBehaviour
 {
+    private const int RunnersRemovedPerProjectileImpact = 10;
+
     [Header("Projectile Launcher Settings")]
     [SerializeField] private int poolSize = 20;
     [SerializeField] private float fireInterval = 2f;
@@ -26,16 +28,8 @@ public class ProjectileLauncher : MonoBehaviour
     {
         cachedCrowdManager = FindFirstObjectByType<PlayerCrowdManager>();
 
-        if (sharedProjectileMaterial == null)
-        {
-            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-            if (shader == null)
-            {
-                shader = Shader.Find("Unlit/Color");
-            }
-            sharedProjectileMaterial = new Material(shader);
-        }
-
+        // Created before anything that can fail: a throw past this point would leave
+        // propBlock null and, worse, projectilePool unassigned.
         if (propBlock == null)
         {
             propBlock = new MaterialPropertyBlock();
@@ -48,6 +42,20 @@ public class ProjectileLauncher : MonoBehaviour
             maxSize: poolSize);
 
         fireTimer = Mathf.Max(0f, initialFireDelay);
+
+        // Shader.Find returns null once the shader is stripped from a player build,
+        // and constructing a Material from a null shader throws. Projectiles then keep
+        // the sphere primitive's own (always-included) material instead of aborting
+        // Start and leaving the pool null.
+        if (sharedProjectileMaterial == null)
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null)
+            {
+                shader = Shader.Find("Unlit/Color");
+            }
+            sharedProjectileMaterial = shader != null ? new Material(shader) : null;
+        }
 
         // Pre-warm so the first shot doesn't pay a creation spike.
         projectilePool.Prewarm(4);
@@ -69,12 +77,13 @@ public class ProjectileLauncher : MonoBehaviour
         g.transform.SetParent(transform, false);
 
         Renderer r = g.GetComponent<Renderer>();
-        if (r != null)
+        if (r != null && sharedProjectileMaterial != null)
         {
             r.sharedMaterial = sharedProjectileMaterial;
         }
 
         TrackingProjectile projectile = g.AddComponent<TrackingProjectile>();
+        projectile.ConfigureImpactDamage(RunnersRemovedPerProjectileImpact);
         projectile.SetExpireCallback(ReleaseProjectile);
 
         g.SetActive(false);
@@ -113,7 +122,16 @@ public class ProjectileLauncher : MonoBehaviour
 
     private void FireAt(GameObject target)
     {
+        if (projectilePool == null || target == null)
+        {
+            return;
+        }
+
         TrackingProjectile projectile = projectilePool.Get();
+        if (projectile == null)
+        {
+            return;
+        }
 
         Vector3 direction = (target.transform.position - transform.position).normalized;
         projectile.Launch(transform.position, direction);
@@ -124,6 +142,11 @@ public class ProjectileLauncher : MonoBehaviour
     {
         Renderer r = projectile != null ? projectile.GetComponentInChildren<Renderer>() : null;
         if (r == null) return;
+
+        if (propBlock == null)
+        {
+            propBlock = new MaterialPropertyBlock();
+        }
 
         // Set color via MaterialPropertyBlock to avoid cloning the shared material.
         propBlock.SetColor("_Color", projectileColor);

@@ -68,5 +68,13 @@ ignore.conf
 # Unity 6 IDE solution (new XML format)
 *.slnx
 
+# Documentation and generated output
+*.md
+*.md.meta
+/Release/
+/ProjectSettings/GvhProjectSettings.xml
+/Assets/Resources/PerformanceTestRunInfo.json
+/Assets/Resources/PerformanceTestRunInfo.json.meta
+
 # NOTE: Assets/Screenshots/*.png is committed intentionally for the README — do not
 # add a rule here that ignores Assets/Screenshots/.

@@ -18,11 +18,13 @@ public class CrackedSpanHazard : Level4HazardBase
 
     [Header("Cracked Span")]
     [SerializeField, Min(1f)] private float spanLength = 4f;
+    [SerializeField] private Collider nearRoadCollider;
+    [SerializeField] private Collider farRoadCollider;
     [SerializeField, Min(0.25f)] private float requiredClearance = 1.25f;
     [SerializeField, Min(0.5f)] private float stopperWidth = 9.2f;
     [SerializeField, Min(0.1f)] private float stopperHeight = 1.15f;
     [SerializeField, Min(0.05f)] private float stopperDepth = 0.25f;
-    [SerializeField, Min(0.5f)] private float warningDistance = 10f;
+    [SerializeField, Min(0.5f)] private float warningDistance = 20f;
 
     [Header("Crossing Mode")]
     [SerializeField] private bool usePhysicalGap = true;
@@ -48,6 +50,9 @@ public class CrackedSpanHazard : Level4HazardBase
     private bool leadJumpCommitted;
     private bool leadCrossingResolved;
     private int gapSessionId;
+    private bool hasGapBoundsSnapshot;
+    private float gapStartZSnapshot;
+    private float gapEndZSnapshot;
 
     protected override void Awake()
     {
@@ -91,9 +96,12 @@ public class CrackedSpanHazard : Level4HazardBase
 
     private void UpdateLegacyGap()
     {
-        float relativeZ = player.transform.position.z - transform.position.z;
-        float nearEdgeThreshold = -Mathf.Max(0.05f, stopperDepth);
-        float crossingPlane = spanLength * 0.5f;
+        GetSpanWorldZBounds(out float startZ, out float endZ);
+        float relativeZ = player.transform.position.z - startZ;
+        float spanWorldLength = endZ - startZ;
+        float worldStopperDepth = Mathf.Abs(transform.TransformVector(Vector3.forward * stopperDepth).z);
+        float nearEdgeThreshold = -Mathf.Max(0.05f, worldStopperDepth);
+        float crossingPlane = spanWorldLength * 0.5f;
 
         if (state != SpanState.Passed &&
             relativeZ >= nearEdgeThreshold &&
@@ -118,24 +126,35 @@ public class CrackedSpanHazard : Level4HazardBase
 
     private void UpdatePhysicalGap()
     {
-        Vector3 nearEdge = transform.TransformPoint(Vector3.zero);
-        Vector3 farEdge = transform.TransformPoint(Vector3.forward * spanLength);
-        float startZ = Mathf.Min(nearEdge.z, farEdge.z);
-        float endZ = Mathf.Max(nearEdge.z, farEdge.z);
+        float startZ;
+        float endZ;
+        if (gapProcessingStarted && hasGapBoundsSnapshot)
+        {
+            startZ = gapStartZSnapshot;
+            endZ = gapEndZSnapshot;
+        }
+        else
+        {
+            GetSpanWorldZBounds(out startZ, out endZ);
+        }
         float relativeZ = player.transform.position.z - startZ;
+        float spanWorldLength = endZ - startZ;
 
         // Start the bounded runner session before the lead reaches the lip so the
         // front and rear positions are captured before the formation spans the gap.
         if (!gapProcessingStarted && player.transform.position.z >= startZ - warningDistance)
         {
-            crowd.BeginRoadGap(gapSessionId, startZ, endZ);
+            gapStartZSnapshot = startZ;
+            gapEndZSnapshot = endZ;
+            hasGapBoundsSnapshot = true;
+            crowd.BeginRoadGap(gapSessionId, gapStartZSnapshot, gapEndZSnapshot);
             gapProcessingStarted = true;
             state = SpanState.Crossing;
         }
 
         if (!gapProcessingStarted || gapProcessingComplete) return;
 
-        float crossingPlane = spanLength * 0.5f;
+        float crossingPlane = spanWorldLength * 0.5f;
         if (!leadCrossingResolved && relativeZ >= crossingPlane)
         {
             if (player.IsAirborne && player.HasCleared(requiredClearance, 0f))
@@ -151,7 +170,7 @@ public class CrackedSpanHazard : Level4HazardBase
             }
         }
 
-        if (!leadCrossingResolved && relativeZ >= spanLength)
+        if (!leadCrossingResolved && relativeZ >= spanWorldLength)
         {
             if (leadJumpCommitted && IsLeadSafeBeyondFarEdge())
             {
@@ -187,6 +206,47 @@ public class CrackedSpanHazard : Level4HazardBase
         }
     }
 
+    private bool TryGetRoadWorldZBounds(out float startZ, out float endZ)
+    {
+        startZ = 0f;
+        endZ = 0f;
+        if (nearRoadCollider == null || farRoadCollider == null ||
+            !nearRoadCollider.enabled || !farRoadCollider.enabled ||
+            !nearRoadCollider.gameObject.activeInHierarchy || !farRoadCollider.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        startZ = nearRoadCollider.bounds.max.z;
+        endZ = farRoadCollider.bounds.min.z;
+        return endZ > startZ + 0.001f;
+    }
+
+    private void GetSpanWorldZBounds(out float startZ, out float endZ)
+    {
+        if (TryGetRoadWorldZBounds(out startZ, out endZ)) return;
+
+        Vector3 nearEdge = transform.TransformPoint(Vector3.zero);
+        Vector3 farEdge = transform.TransformPoint(Vector3.forward * spanLength);
+        startZ = Mathf.Min(nearEdge.z, farEdge.z);
+        endZ = Mathf.Max(nearEdge.z, farEdge.z);
+    }
+
+    private void GetSpanLocalGeometryBounds(out float startLocalZ, out float endLocalZ)
+    {
+        if (TryGetRoadWorldZBounds(out float startZ, out float endZ))
+        {
+            Vector3 nearPoint = transform.InverseTransformPoint(new Vector3(transform.position.x, transform.position.y, startZ));
+            Vector3 farPoint = transform.InverseTransformPoint(new Vector3(transform.position.x, transform.position.y, endZ));
+            startLocalZ = Mathf.Min(nearPoint.z, farPoint.z);
+            endLocalZ = Mathf.Max(nearPoint.z, farPoint.z);
+            if (endLocalZ > startLocalZ + 0.001f) return;
+        }
+
+        startLocalZ = 0f;
+        endLocalZ = spanLength;
+    }
+
     private bool IsLeadSafeBeyondFarEdge()
     {
         float roadSurfaceY = transform.position.y + roadSurfaceOffset;
@@ -214,6 +274,9 @@ public class CrackedSpanHazard : Level4HazardBase
         leadJumpCommitted = false;
         leadCrossingResolved = false;
         gapSessionId = GetInstanceID();
+        hasGapBoundsSnapshot = false;
+        gapStartZSnapshot = 0f;
+        gapEndZSnapshot = 0f;
         SetStopperActive(!usePhysicalGap);
         if (bridge != null) bridge.gameObject.SetActive(!usePhysicalGap);
         if (telegraph != null) telegraph.gameObject.SetActive(false);
@@ -222,7 +285,7 @@ public class CrackedSpanHazard : Level4HazardBase
     protected override void OnValidate()
     {
         base.OnValidate();
-        spanLength = Mathf.Clamp(spanLength, 1f, 12f);
+        spanLength = Mathf.Clamp(spanLength, 1f, 30f);
         requiredClearance = Mathf.Clamp(requiredClearance, 0.25f, 3f);
         stopperWidth = Mathf.Clamp(stopperWidth, 0.5f, 9.6f);
         stopperHeight = Mathf.Clamp(stopperHeight, 0.1f, 2f);
@@ -254,6 +317,14 @@ public class CrackedSpanHazard : Level4HazardBase
     private void ApplyGeometry()
     {
         CacheSpanParts();
+        if (visual != null)
+        {
+            // Keep the authored crack visuals in the same coordinates as the physical gap.
+            visual.localPosition = Vector3.zero;
+            visual.localRotation = Quaternion.identity;
+            visual.localScale = Vector3.one;
+        }
+
 
         if (leadStopper != null)
         {
@@ -330,16 +401,79 @@ public class CrackedSpanHazard : Level4HazardBase
                 rightEdge.localScale = new Vector3(rightEdge.localScale.x, rightEdge.localScale.y, spanLength);
             }
         }
+
+        AlignGeometryToRoadBounds();
+    }
+
+    private void AlignGeometryToRoadBounds()
+    {
+        if (visual == null || !TryGetRoadWorldZBounds(out float startZ, out float endZ)) return;
+
+        GetSpanLocalGeometryBounds(out float startLocalZ, out float endLocalZ);
+        float geometryLength = endLocalZ - startLocalZ;
+        if (geometryLength <= 0.001f) return;
+
+        visual.localPosition = new Vector3(0f, 0f, startLocalZ);
+        visual.localRotation = Quaternion.identity;
+        visual.localScale = Vector3.one;
+
+        Transform bed = visual.Find("CrackBed");
+        if (bed != null)
+        {
+            bed.localPosition = new Vector3(0f, usePhysicalGap ? -pitDepth : -0.015f, geometryLength * 0.5f);
+            bed.localScale = new Vector3(stopperWidth, bed.localScale.y, geometryLength);
+        }
+
+        Transform core = visual.Find("CrackCore");
+        if (core != null)
+        {
+            core.localPosition = new Vector3(0f, usePhysicalGap ? -Mathf.Max(0.05f, pitDepth - 0.15f) : 0.03f, geometryLength * 0.5f);
+            core.localScale = new Vector3(core.localScale.x, core.localScale.y, Mathf.Max(0.2f, geometryLength - 0.3f));
+        }
+
+        Transform nearLip = visual.Find("NearLip");
+        if (nearLip != null) nearLip.localPosition = new Vector3(0f, nearLip.localPosition.y, 0.05f);
+
+        Transform farLip = visual.Find("FarLip");
+        if (farLip != null) farLip.localPosition = new Vector3(0f, farLip.localPosition.y, geometryLength - 0.05f);
+
+        Transform leftEdge = visual.Find("LeftEdge");
+        if (leftEdge != null)
+        {
+            leftEdge.localPosition = new Vector3(-stopperWidth * 0.5f, leftEdge.localPosition.y, geometryLength * 0.5f);
+            leftEdge.localScale = new Vector3(leftEdge.localScale.x, leftEdge.localScale.y, geometryLength);
+        }
+
+        Transform rightEdge = visual.Find("RightEdge");
+        if (rightEdge != null)
+        {
+            rightEdge.localPosition = new Vector3(stopperWidth * 0.5f, rightEdge.localPosition.y, geometryLength * 0.5f);
+            rightEdge.localScale = new Vector3(rightEdge.localScale.x, rightEdge.localScale.y, geometryLength);
+        }
+
+        if (bridge != null)
+        {
+            bridge.localPosition = new Vector3(0f, -0.1f, startLocalZ + geometryLength * 0.5f);
+            BoxCollider bridgeCollider = bridge.GetComponent<BoxCollider>();
+            if (bridgeCollider != null) bridgeCollider.size = new Vector3(stopperWidth, 0.2f, geometryLength + 0.1f);
+        }
+
+        if (leadStopper != null)
+        {
+            leadStopper.localPosition = new Vector3(0f, 0f, startLocalZ - stopperDepth * 0.5f);
+        }
     }
 
     private void UpdateTelegraph()
     {
         if (telegraph == null) return;
 
-        float distanceToNearEdge = transform.position.z - player.transform.position.z;
+        GetSpanWorldZBounds(out float startZ, out float endZ);
+        float distanceToNearEdge = startZ - player.transform.position.z;
+        float spanWorldLength = endZ - startZ;
         bool show = state != SpanState.Passed &&
             distanceToNearEdge <= warningDistance &&
-            distanceToNearEdge >= -spanLength;
+            distanceToNearEdge >= -spanWorldLength;
         telegraph.gameObject.SetActive(show);
     }
 
@@ -387,7 +521,7 @@ public class CrackedSpanHazard : Level4HazardBase
 
     private void ProcessGapRunners(float startZ, float endZ)
     {
-        if (!usePhysicalGap || crowd == null || spanLength <= 0f || gapCrowdComplete) return;
+        if (!usePhysicalGap || crowd == null || endZ <= startZ || gapCrowdComplete) return;
 
         crowd.ProcessRoadGap(
             gapSessionId,
@@ -410,11 +544,12 @@ public class CrackedSpanHazard : Level4HazardBase
     private void OnDrawGizmosSelected()
     {
         Gizmos.color = new Color(0.86f, 0.16f, 0.98f, 0.35f);
-        Vector3 center = transform.position + Vector3.forward * (spanLength * 0.5f);
-        Gizmos.DrawWireCube(center, new Vector3(stopperWidth, 0.05f, spanLength));
+        GetSpanWorldZBounds(out float startZ, out float endZ);
+        Vector3 center = new Vector3(transform.position.x, transform.position.y, (startZ + endZ) * 0.5f);
+        Gizmos.DrawWireCube(center, new Vector3(stopperWidth, 0.05f, endZ - startZ));
         Gizmos.color = Color.white;
         Gizmos.DrawWireCube(
-            transform.position + Vector3.forward * (-stopperDepth * 0.5f) + Vector3.up * (stopperHeight * 0.5f),
+            new Vector3(transform.position.x, transform.position.y + stopperHeight * 0.5f, startZ - stopperDepth * 0.5f),
             new Vector3(stopperWidth, stopperHeight, stopperDepth));
     }
 }

@@ -16,8 +16,6 @@ public class DollarCoin : MonoBehaviour
     [SerializeField] private int mediumCoinValue = 20;
     [SerializeField] private int largeCoinValue = 50;
     [SerializeField] private float smallCoinScale = 1f;
-    [SerializeField] private float chimeFrequency = 1320f;
-    [SerializeField] private float chimeDuration = 0.08f;
 
     private Collider coinCollider;
     private bool collected;
@@ -59,7 +57,8 @@ public class DollarCoin : MonoBehaviour
     {
         if (collected) return;
 
-        if (!IsPlayerCrowdCollider(other))
+        PlayerCrowdManager playerCrowdManager = other.GetComponentInParent<PlayerCrowdManager>();
+        if (!IsPlayerCrowdCollider(other, playerCrowdManager))
         {
             return;
         }
@@ -72,13 +71,13 @@ public class DollarCoin : MonoBehaviour
             wallet.AddRunCoins(CurrencyValue);
         }
 
-        PlayChime();
+        if (playerCrowdManager != null) playerCrowdManager.PlayCoinPickupSfx();
         Destroy(gameObject);
     }
 
-    private bool IsPlayerCrowdCollider(Collider other)
+    private bool IsPlayerCrowdCollider(Collider other, PlayerCrowdManager playerCrowdManager)
     {
-        if (other.GetComponentInParent<PlayerCrowdManager>() != null) return true;
+        if (playerCrowdManager != null) return true;
         if (other.GetComponentInParent<PlayerController>() != null) return true;
         return other.CompareTag("Player") || other.transform.root.CompareTag("Player");
     }
@@ -101,19 +100,4 @@ public class DollarCoin : MonoBehaviour
         transform.localScale = scale;
     }
 
-    private void PlayChime()
-    {
-        AudioClip clip = AudioClip.Create("DollarCoinChime", Mathf.CeilToInt(44100 * chimeDuration), 1, 44100, false);
-        float[] samples = new float[clip.samples];
-
-        for (int i = 0; i < samples.Length; i++)
-        {
-            float t = i / 44100f;
-            float fade = 1f - (i / (float)samples.Length);
-            samples[i] = Mathf.Sin(2f * Mathf.PI * chimeFrequency * t) * fade * 0.35f;
-        }
-
-        clip.SetData(samples, 0);
-        AudioSource.PlayClipAtPoint(clip, transform.position, 0.8f);
-    }
 }

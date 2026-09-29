@@ -14,16 +14,17 @@ public class FallingHazard : MonoBehaviour
     [SerializeField] private float killRadius = 1.2f;
     [SerializeField] private float floatingHeight = 5f;
     [SerializeField] private float resetDelay = 1.5f;
+    [Tooltip("Minimum reveal distance. At higher speeds the trap reveals earlier so its fall aligns with the authored track position.")]
     [SerializeField] private float activationOffset = 7f;
 
     private HazardState state = HazardState.Hidden;
     private PlayerCrowdManager cachedCrowdManager;
+    private PlayerController cachedPlayerController;
     private Renderer[] cachedRenderers;
     private float groundY;
     private Vector3 originPos;
     private float yVelocity;
     private float stateTimer;
-    private bool hasHitThisDrop;
     private bool hasTriggeredThisRun;
 
     private void Awake()
@@ -35,6 +36,9 @@ public class FallingHazard : MonoBehaviour
     private void Start()
     {
         cachedCrowdManager = FindFirstObjectByType<PlayerCrowdManager>();
+        cachedPlayerController = cachedCrowdManager != null
+            ? cachedCrowdManager.GetComponent<PlayerController>()
+            : null;
         DetectGround();
 
         // Auto-raise the trap above the road so it can be placed at floor level in the editor.
@@ -53,7 +57,17 @@ public class FallingHazard : MonoBehaviour
             Collider roadCol = hit.collider;
             if (roadCol != null && !roadCol.isTrigger)
             {
-                groundY = roadCol.bounds.min.y;
+                // The road collider is authored with its origin at the centre of
+                // the slab (Level 2: y=-0.1, height=0.2).  Using bounds.min.y
+                // places the drop below the visible surface and makes its landing
+                // envelope disagree with the authored track surface.  The ray hit
+                // is the most precise surface value for a future non-flat road;
+                // fall back to the collider top when the hit has no useful point.
+                groundY = hit.point.y;
+                if (float.IsNaN(groundY) || float.IsInfinity(groundY))
+                {
+                    groundY = roadCol.bounds.max.y;
+                }
                 return;
             }
         }
@@ -69,6 +83,8 @@ public class FallingHazard : MonoBehaviour
         {
             cachedCrowdManager = FindFirstObjectByType<PlayerCrowdManager>();
             if (cachedCrowdManager == null) return;
+
+            cachedPlayerController = cachedCrowdManager.GetComponent<PlayerController>();
         }
 
         switch (state)
@@ -97,11 +113,32 @@ public class FallingHazard : MonoBehaviour
 
         // The visual is hidden until the player crosses the forward trigger line.
         // Using Z rather than 3D distance makes timing consistent across lanes.
-        float activationZ = originPos.z - activationOffset;
+        float activationZ = originPos.z - GetActivationLeadDistance();
         if (cachedCrowdManager.transform.position.z >= activationZ)
         {
             BeginFalling();
         }
+    }
+
+    private float GetActivationLeadDistance()
+    {
+        float leadDistance = Mathf.Max(0f, activationOffset);
+        if (cachedPlayerController == null || gravity >= -0.01f || floatingHeight <= 0.05f)
+        {
+            return leadDistance;
+        }
+
+        float forwardSpeed = Mathf.Max(0f, cachedPlayerController.ForwardSpeed);
+        if (cachedCrowdManager != null && cachedCrowdManager.IsFighting)
+        {
+            forwardSpeed = cachedCrowdManager.IsBossFightActive ? 0f : forwardSpeed * 0.25f;
+        }
+
+        // Match the hidden trigger lead to the distance the player travels during
+        // the drop. Keep the authored offset as a minimum reaction distance.
+        float fallDistance = floatingHeight - 0.05f;
+        float fallDuration = Mathf.Sqrt(2f * fallDistance / -gravity);
+        return Mathf.Max(leadDistance, forwardSpeed * fallDuration);
     }
 
     private void BeginFalling()
@@ -113,7 +150,6 @@ public class FallingHazard : MonoBehaviour
         SetVisible(true);
         state = HazardState.Falling;
         yVelocity = 0f;
-        hasHitThisDrop = false;
     }
 
     private void UpdateFalling()
@@ -122,11 +158,7 @@ public class FallingHazard : MonoBehaviour
         yVelocity += gravity * Time.deltaTime;
         transform.position += Vector3.up * (yVelocity * Time.deltaTime);
 
-        // Crush any runner inside the kill radius on the way down (once per drop).
-        if (!hasHitThisDrop)
-        {
-            CheckRunnerCollisions();
-        }
+        CheckRunnerCollisions();
 
         // Land on the road.
         if (transform.position.y <= groundY + 0.05f)
@@ -139,6 +171,16 @@ public class FallingHazard : MonoBehaviour
 
     private void UpdateLanded()
     {
+        CheckRunnerCollisions();
+
+        // Keep the landed trap active until the lead has passed its impact point,
+        // then preserve the existing window for trailing runners to pass through.
+        if (cachedCrowdManager.transform.position.z < originPos.z + killRadius)
+        {
+            stateTimer = 0f;
+            return;
+        }
+
         stateTimer += Time.deltaTime;
         if (stateTimer >= resetDelay)
         {
@@ -171,11 +213,9 @@ public class FallingHazard : MonoBehaviour
             float distance = Vector3.Distance(child.position, transform.position);
             if (distance <= killRadius)
             {
-                hasHitThisDrop = true; // One crush per drop so a single trap can't wipe the whole crowd.
                 Color popColor = GetRunnerColor(child);
                 Vector3 effectPos = child.position + Vector3.up * 0.5f;
                 cachedCrowdManager.RemoveRunnerByHazard(child.gameObject, effectPos, popColor);
-                break;
             }
         }
     }
@@ -205,7 +245,8 @@ public class FallingHazard : MonoBehaviour
         Gizmos.color = new Color(1f, 0f, 0f, 0.2f);
         Gizmos.DrawWireSphere(transform.position, killRadius);
 
-        // Forward activation line. This is authoring/debug visualization only.
+        // Shows the authored minimum lead; runtime may move this line farther back
+        // as forward speed rises. This is authoring/debug visualization only.
         Gizmos.color = new Color(1f, 0.92f, 0.016f, 0.35f);
         Vector3 triggerCenter = new Vector3(transform.position.x, 1f, transform.position.z - activationOffset);
         Gizmos.DrawWireCube(triggerCenter, new Vector3(10f, 2f, 1f));

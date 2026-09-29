@@ -11,6 +11,8 @@ public class CircularSaw : MonoBehaviour
     [Header("Collision Settings")]
     [Tooltip("Bán kính phát hiện lính chạm cưa để tiêu diệt.")]
     [SerializeField] private float killRadius = 0.8f;
+    [Tooltip("Authored vertical body height used when testing the saw sphere against a runner.")]
+    [SerializeField, Min(0.1f)] private float runnerHeight = 1.6f;
     [SerializeField] private bool useExplicitXLimits;
     [SerializeField] private float leftLimitOverride = -2.1f;
     [SerializeField] private float rightLimitOverride = 2.1f;
@@ -27,6 +29,7 @@ public class CircularSaw : MonoBehaviour
         spinSpeed = Mathf.Clamp(spinSpeed, 0f, 1440f);
         phaseOffset = Mathf.Max(0f, phaseOffset);
         killRadius = Mathf.Clamp(killRadius, 0.05f, 1.5f);
+        runnerHeight = Mathf.Clamp(runnerHeight, 0.1f, 3f);
         leftLimitOverride = Mathf.Clamp(leftLimitOverride, -4.5f, 4.5f);
         rightLimitOverride = Mathf.Clamp(rightLimitOverride, -4.5f, 4.5f);
         if (rightLimitOverride < leftLimitOverride + 0.5f)
@@ -82,11 +85,14 @@ public class CircularSaw : MonoBehaviour
             if (i >= runners.Count || runners[i] == null) continue;
             Transform child = runners[i].transform;
 
-            // Tính toán khoảng cách giữa lính xanh và lưỡi cưa
-            float distance = Vector3.Distance(child.position, transform.position);
+            // Treat each runner as a vertical body segment instead of a point.
+            // The saw remains a sphere with killRadius; this does not enlarge its XZ area.
+            Vector3 nearestBodyPoint = ClosestPointOnRunnerVerticalSegment(
+                transform.position, child.position, runnerHeight);
+            float distanceSqr = (transform.position - nearestBodyPoint).sqrMagnitude;
 
             // Nếu lính chạm vào bán kính nguy hiểm của cưa
-            if (distance <= killRadius)
+            if (distanceSqr <= killRadius * killRadius)
             {
                 // Lấy màu sắc của lính để sinh nổ hạt tương ứng
                 Color popColor = Color.blue;
@@ -111,6 +117,19 @@ public class CircularSaw : MonoBehaviour
                 cachedCrowdManager.RemoveRunner(child.gameObject);
             }
         }
+    }
+
+    /// <summary>
+    /// Returns the nearest point on a runner's authored vertical body segment.
+    /// This is pure geometry so collision boundaries can be checked without scene state.
+    /// </summary>
+    public static Vector3 ClosestPointOnRunnerVerticalSegment(
+        Vector3 sphereCenter, Vector3 runnerBase, float runnerHeight)
+    {
+        float nonNegativeHeight = Mathf.Max(0f, runnerHeight);
+        float topY = runnerBase.y + nonNegativeHeight;
+        float nearestY = Mathf.Clamp(sphereCenter.y, runnerBase.y, topY);
+        return new Vector3(runnerBase.x, nearestY, runnerBase.z);
     }
 
     private void DetectRoadBoundaries()

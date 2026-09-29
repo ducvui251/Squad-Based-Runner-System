@@ -28,31 +28,37 @@ public class RisingBlockHazard : Level4HazardBase
         if (!CanProcess()) return;
 
         elapsed += Time.deltaTime;
+        raised01 = EvaluateRaised01(elapsed, cycleDuration, riseDuration, raisedHold, lowerDuration);
+
+        ApplyVisuals();
+        if (raised01 > 0.75f)
+        {
+            // The visible block top is raisedHeight * raised01 above the road.
+            // Use that same animated envelope for damage so the 75% activation
+            // threshold cannot remove a runner above the still-lower visual top.
+            float activeHitHeight = raisedHeight * raised01;
+            RemoveOverlappingRunners(transform.position.x, width, activeHitHeight, hazardColor);
+        }
+    }
+
+    public static float EvaluateRaised01(float elapsed, float cycleDuration, float riseDuration, float raisedHold, float lowerDuration)
+    {
         float cycle = Mathf.Max(cycleDuration, riseDuration + raisedHold + lowerDuration + 0.1f);
         float time = Mathf.Repeat(elapsed, cycle);
         float retractedDuration = cycle - riseDuration - raisedHold - lowerDuration;
         if (time < retractedDuration)
         {
-            raised01 = 0f;
+            return 0f;
         }
         else if (time < retractedDuration + riseDuration)
         {
-            raised01 = Mathf.InverseLerp(retractedDuration, retractedDuration + riseDuration, time);
+            return Mathf.InverseLerp(retractedDuration, retractedDuration + riseDuration, time);
         }
         else if (time < retractedDuration + riseDuration + raisedHold)
         {
-            raised01 = 1f;
+            return 1f;
         }
-        else
-        {
-            raised01 = 1f - Mathf.InverseLerp(retractedDuration + riseDuration + raisedHold, cycle, time);
-        }
-
-        ApplyVisuals();
-        if (raised01 > 0.75f)
-        {
-            RemoveOverlappingRunners(transform.position.x, width, raisedHeight, hazardColor);
-        }
+        return 1f - Mathf.InverseLerp(retractedDuration + riseDuration + raisedHold, cycle, time);
     }
 
     protected override void OnValidate()

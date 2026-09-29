@@ -51,7 +51,8 @@ MonoBehaviour:
   chargeDuration: 1.5
   dischargeDuration: 0.5
   phaseOffset: 0
-  killRadius: 1.05
+  chargeRingBaseRadius: 1.1
+  dischargeRingBaseRadius: 1.2
   maxRunnersPerDischarge: 2
   runnerHeight: 1.6
   chargeRing: {fileID: 5793448590710236336}

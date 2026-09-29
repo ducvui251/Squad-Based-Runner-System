@@ -7,6 +7,11 @@ using UnityEngine.SceneManagement;
 
 public static class BuildLevel3PulseboundFoundry
 {
+    private const string PulsePlatePrefabPath = "Assets/Prefabs/Traps/Level3/PulsePlate.prefab";
+    private const string PulsePlatePrefabGuid = "3857dd2ec61e66f4ba246095bb02bec2";
+    private const string SwingHammerPrefabPath = "Assets/Prefabs/Traps/Shared/SwingHammer.prefab";
+    private const string SwingHammerPrefabGuid = "6a636c385c2777a4e9b2f5f288707ec5";
+
     private static Material pulseBody;
     private static Material pulseCharge;
     private static Material pulseDischarge;
@@ -15,43 +20,96 @@ public static class BuildLevel3PulseboundFoundry
     private static Material hammerMaterial;
     private static Material cannonMaterial;
     private static Material markerMaterial;
+    private static GameObject pulsePlatePrefab;
+    private static GameObject swingHammerPrefab;
 
+    [MenuItem("Spiral Squad/Levels/Build Level3 - Pulsebound Foundry")]
     public static void Main()
     {
-        Scene scene = EditorSceneManager.GetActiveScene();
+        Build(EditorSceneManager.GetActiveScene(), save: true);
+    }
+
+    /// <summary>
+    /// Builds the Level 3 route inside the supplied scene only.  Passing the
+    /// scene explicitly is important when Level1/Level3/Level5 are open
+    /// additively: no hierarchy lookup may escape the target scene.
+    /// </summary>
+    public static void Build(Scene scene, bool save)
+    {
         if (!scene.IsValid() || scene.name != "Level3")
             throw new InvalidOperationException("Open Assets/Scenes/Level3.unity before building Level 3.");
 
-        GameObject root = GameObject.Find("Level 2 - Momentum Trapworks");
-        if (root == null) throw new InvalidOperationException("Level 2 root not found in the Level3 copy.");
+        GameObject root = FindInScene(scene, "Level 3 - Pulsebound Foundry");
+        if (root == null) root = FindInScene(scene, "Level 4 - Vaultline Citadel");
+        if (root == null) root = FindInScene(scene, "Level 2 - Momentum Trapworks");
+        if (root == null) throw new InvalidOperationException("Level3 root not found in the supplied scene.");
+        pulsePlatePrefab = LoadPulsePlatePrefab();
+        LoadMaterials(allowAssetWrite: save);
         root.name = "Level 3 - Pulsebound Foundry";
-
-        LoadMaterials();
-        ConfigureCore(root);
+        ConfigureCore(scene, root);
+        foreach (FinishGate finish in CollisionAuditValidator.Components<FinishGate>(scene))
+            CollisionAuditValidator.AuthorFinish(finish);
         ConfigureGates(root);
-        ConfigureHudAndCamera();
+        ConfigureHudAndCamera(scene);
         BuildTrapSections(root);
+        LevelEnemyEncounterAuthoring.RebuildForLevel(root, 3);
         EditorSceneManager.MarkSceneDirty(scene);
-        EditorSceneManager.SaveScene(scene);
-        AssetDatabase.SaveAssets();
-        Debug.Log("LEVEL3_SCENE_BUILT: Pulsebound Foundry scene saved with authored trap sections.");
+        if (save)
+        {
+            SaveGeneratedMaterials();
+            EditorSceneManager.SaveScene(scene);
+        }
+        Debug.Log("LEVEL3_SCENE_BUILT: Pulsebound Foundry route built" + (save ? " and saved." : " without saving assets or scene."));
     }
 
-    private static void LoadMaterials()
+    private static void LoadMaterials(bool allowAssetWrite)
     {
-        pulseBody = EnsureMaterial("Level3_PulseBody", new Color(0.06f, 0.22f, 0.30f));
-        pulseCharge = EnsureMaterial("Level3_PulseCharge", new Color(0.10f, 0.75f, 1f));
-        pulseDischarge = EnsureMaterial("Level3_PulseDischarge", new Color(1f, 0.16f, 0.12f));
-        spikeMaterial = EnsureMaterial("Level3_Spikes", new Color(0.95f, 0.12f, 0.14f));
-        railMaterial = EnsureMaterial("Level3_Rail", new Color(0.08f, 0.08f, 0.12f));
-        hammerMaterial = EnsureMaterial("Level3_Hammer", new Color(1f, 0.58f, 0.08f));
-        cannonMaterial = EnsureMaterial("Level3_Cannon", new Color(0.36f, 0.12f, 0.55f));
-        markerMaterial = EnsureMaterial("Level3_Marker", new Color(0.18f, 0.95f, 0.65f));
+        pulseBody = EnsureMaterial("Level3_PulseBody", new Color(0.06f, 0.22f, 0.30f), allowAssetWrite);
+        pulseCharge = EnsureMaterial("Level3_PulseCharge", new Color(0.10f, 0.75f, 1f), allowAssetWrite);
+        pulseDischarge = EnsureMaterial("Level3_PulseDischarge", new Color(1f, 0.16f, 0.12f), allowAssetWrite);
+        spikeMaterial = EnsureMaterial("Level3_Spikes", new Color(0.95f, 0.12f, 0.14f), allowAssetWrite);
+        railMaterial = EnsureMaterial("Level3_Rail", new Color(0.08f, 0.08f, 0.12f), allowAssetWrite);
+        hammerMaterial = EnsureMaterial("Level3_Hammer", new Color(1f, 0.58f, 0.08f), allowAssetWrite);
+        cannonMaterial = EnsureMaterial("Level3_Cannon", new Color(0.36f, 0.12f, 0.55f), allowAssetWrite);
+        markerMaterial = EnsureMaterial("Level3_Marker", new Color(0.18f, 0.95f, 0.65f), allowAssetWrite);
     }
 
-    private static void ConfigureCore(GameObject root)
+    private static GameObject LoadPulsePlatePrefab()
     {
-        Transform track = root.transform.Find("Track/Track 10m x 300m");
+        string guidPath = AssetDatabase.GUIDToAssetPath(PulsePlatePrefabGuid);
+        if (!string.Equals(guidPath, PulsePlatePrefabPath, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("PulsePlate GUID resolves to '" + guidPath + "', expected '" + PulsePlatePrefabPath + "'.");
+
+        string actualGuid = AssetDatabase.AssetPathToGUID(PulsePlatePrefabPath);
+        if (!string.Equals(actualGuid, PulsePlatePrefabGuid, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("PulsePlate prefab at '" + PulsePlatePrefabPath + "' has GUID '" + actualGuid + "', expected '" + PulsePlatePrefabGuid + "'.");
+
+        GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PulsePlatePrefabPath);
+        if (prefab == null)
+            throw new InvalidOperationException("PulsePlate prefab could not be loaded at '" + PulsePlatePrefabPath + "'.");
+        if (prefab.GetComponent<PulsePlateHazard>() == null)
+            throw new InvalidOperationException("PulsePlate prefab at '" + PulsePlatePrefabPath + "' is missing PulsePlateHazard.");
+        return prefab;
+    }
+
+    private static void SaveGeneratedMaterials()
+    {
+        AssetDatabase.SaveAssetIfDirty(pulseBody);
+        AssetDatabase.SaveAssetIfDirty(pulseCharge);
+        AssetDatabase.SaveAssetIfDirty(pulseDischarge);
+        AssetDatabase.SaveAssetIfDirty(spikeMaterial);
+        AssetDatabase.SaveAssetIfDirty(railMaterial);
+        AssetDatabase.SaveAssetIfDirty(hammerMaterial);
+        AssetDatabase.SaveAssetIfDirty(cannonMaterial);
+        AssetDatabase.SaveAssetIfDirty(markerMaterial);
+    }
+
+    private static void ConfigureCore(Scene scene, GameObject root)
+    {
+        Transform track = FindFirstChild(root,
+            "Track/Track 10m x 300m",
+            "Track/Track 10m x 340m",
+            "Track/Track 10m x 360m");
         if (track == null) throw new InvalidOperationException("Track not found.");
         track.name = "Track 10m x 340m";
         track.localPosition = new Vector3(0f, -0.1f, 170f);
@@ -64,26 +122,30 @@ public static class BuildLevel3PulseboundFoundry
         Transform finish = root.transform.Find("FinishGate");
         if (finish != null) finish.localPosition = new Vector3(0f, 0f, 338f);
 
-        GameObject player = GameObject.Find("Player");
+        GameObject player = FindInScene(scene, "Player");
         if (player != null)
         {
             player.transform.position = new Vector3(0f, 0f, 3f);
             PlayerController controller = player.GetComponent<PlayerController>();
             if (controller != null)
             {
+                SetFloat(controller, "forwardSpeed", 6f);
                 SetFloat(controller, "startForwardSpeed", 6f);
-                SetFloat(controller, "maxForwardSpeed", 10f);
+                SetFloat(controller, "maxForwardSpeed", 18f);
                 SetFloat(controller, "speedRampStartZ", 3f);
-                SetFloat(controller, "speedRampEndZ", 338f);
+                SetFloat(controller, "speedRampEndZ", 169f);
             }
         }
     }
 
     private static void ConfigureGates(GameObject root)
     {
-        ConfigureGate(root.transform.Find("Gates/Gate A Z24"), "Gate A Z28", 28f, 30, 2);
-        ConfigureGate(root.transform.Find("Gates/Gate B Z104"), "Gate B Z128", 128f, 50, 2);
-        ConfigureGate(root.transform.Find("Gates/Gate C Z240"), "Gate C Z240", 240f, 75, 2);
+        ConfigureGate(FindFirstChild(root, "Gates/Gate A Z24", "Gates/Gate A Z28"),
+            "Gate A Z28", 28f, 30, 2);
+        ConfigureGate(FindFirstChild(root, "Gates/Gate B Z104", "Gates/Gate B Z128"),
+            "Gate B Z128", 128f, 50, 2);
+        ConfigureGate(FindFirstChild(root, "Gates/Gate C Z240", "Gates/Gate C Z238"),
+            "Gate C Z240", 240f, 75, 2);
     }
 
     private static void ConfigureGate(Transform gateRoot, string newName, float z, int addValue, int multiplyValue)
@@ -106,9 +168,9 @@ public static class BuildLevel3PulseboundFoundry
         gate.UpdateGateText();
     }
 
-    private static void ConfigureHudAndCamera()
+    private static void ConfigureHudAndCamera(Scene scene)
     {
-        GameObject canvasObject = GameObject.Find("Level HUD Canvas");
+        GameObject canvasObject = FindInScene(scene, "Level HUD Canvas");
         if (canvasObject != null)
         {
             LevelHud hud = canvasObject.GetComponent<LevelHud>();
@@ -117,14 +179,18 @@ public static class BuildLevel3PulseboundFoundry
                 SetFloat(hud, "trackLength", 338f);
                 SetString(hud, "levelLabel", "LEVEL 3 - PULSEBOUND FOUNDRY");
             }
-            SetText("Level HUD Canvas/HUD Level Title", "LEVEL 3 - PULSEBOUND FOUNDRY");
-            SetText("Level HUD Canvas/HUD Run Subtitle", "PULSEBOUND FOUNDRY");
+            SetText(scene, "Level HUD Canvas/HUD Level Title", "LEVEL 3 - PULSEBOUND FOUNDRY");
+            SetText(scene, "Level HUD Canvas/HUD Run Subtitle", "PULSEBOUND FOUNDRY");
         }
 
-        SetText("Player/World Level Label", "LEVEL 3");
-        GameObject camera = GameObject.Find("Level 2 Camera");
+        SetText(scene, "Player/World Level Label", "LEVEL 3");
+        GameObject camera = FindInScene(scene, "Level 2 Camera");
+        if (camera == null) camera = FindInScene(scene, "Level 3 Camera");
+        if (camera == null) camera = FindInScene(scene, "Level 4 Camera");
         if (camera != null) camera.name = "Level 3 Camera";
-        GameObject follow = GameObject.Find("CM Level2 Crowd Follow");
+        GameObject follow = FindInScene(scene, "CM Level2 Crowd Follow");
+        if (follow == null) follow = FindInScene(scene, "CM Level3 Crowd Follow");
+        if (follow == null) follow = FindInScene(scene, "CM Level4 Crowd Follow");
         if (follow != null) follow.name = "CM Level3 Crowd Follow";
     }
 
@@ -143,7 +209,7 @@ public static class BuildLevel3PulseboundFoundry
 
         Transform shuttleTutorial = CreateSection(sections, "Spike Shuttle Tutorial");
         CreateSpike(shuttleTutorial, "Spike Shuttle 01", 88f, -3.8f, 3.8f, 0f);
-        CreateSpike(shuttleTutorial, "Spike Shuttle 02", 106f, 3.8f, -3.8f, 3.75f);
+        CreateSpike(shuttleTutorial, "Spike Shuttle 02", 106f, 3.8f, -3.8f, 0f);
 
         Transform hammerAlley = CreateSection(sections, "Hammer Alley");
         CreateHammer(hammerAlley, "Swing Hammer 01", -2.4f, 148f, 0f);
@@ -188,34 +254,19 @@ public static class BuildLevel3PulseboundFoundry
 
     private static void CreatePulse(Transform parent, string name, float x, float z, float phase)
     {
-        GameObject pulsePrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Level3/PulsePlate.prefab");
-        if (pulsePrefab != null)
-        {
-            GameObject prefabInstance = (GameObject)PrefabUtility.InstantiatePrefab(pulsePrefab, parent);
-            prefabInstance.name = name;
-            prefabInstance.transform.localPosition = new Vector3(x, 0.12f, z);
-            SetFloat(prefabInstance.GetComponent<PulsePlateHazard>(), "phaseOffset", phase);
-            return;
-        }
+        if (pulsePlatePrefab == null)
+            throw new InvalidOperationException("PulsePlate prefab was not validated before trap construction.");
 
-        GameObject root = new GameObject(name);
-        root.transform.SetParent(parent, false);
-        root.transform.localPosition = new Vector3(x, 0.12f, z);
-        CreatePrimitive("Plate", PrimitiveType.Cylinder, root.transform, Vector3.zero,
-            new Vector3(1.9f, 0.06f, 1.9f), pulseBody);
-        GameObject charge = CreatePrimitive("Charge Ring", PrimitiveType.Cylinder, root.transform,
-            new Vector3(0f, 0.08f, 0f), new Vector3(2.2f, 0.025f, 2.2f), pulseCharge);
-        GameObject discharge = CreatePrimitive("Discharge Ring", PrimitiveType.Cylinder, root.transform,
-            new Vector3(0f, 0.11f, 0f), new Vector3(2.4f, 0.03f, 2.4f), pulseDischarge);
-        PulsePlateHazard hazard = root.AddComponent<PulsePlateHazard>();
-        SetFloat(hazard, "cycleDuration", 3.5f);
-        SetFloat(hazard, "chargeDuration", 1.5f);
-        SetFloat(hazard, "dischargeDuration", 0.5f);
+        GameObject prefabInstance = (GameObject)PrefabUtility.InstantiatePrefab(pulsePlatePrefab, parent);
+        prefabInstance.name = name;
+        prefabInstance.transform.localPosition = new Vector3(x, 0.12f, z);
+        PulsePlateHazard hazard = prefabInstance.GetComponent<PulsePlateHazard>();
+        if (hazard == null)
+            throw new InvalidOperationException("PulsePlate prefab is missing PulsePlateHazard.");
+        SetFloat(hazard, "chargeRingBaseRadius", 1.1f);
+        SetFloat(hazard, "dischargeRingBaseRadius", 1.2f);
+        SetFloat(hazard, "runnerHeight", 1.6f);
         SetFloat(hazard, "phaseOffset", phase);
-        SetFloat(hazard, "killRadius", 1.05f);
-        SetInt(hazard, "maxRunnersPerDischarge", 2);
-        SetTransform(hazard, "chargeRing", charge.transform);
-        SetTransform(hazard, "dischargeRing", discharge.transform);
     }
 
     private static void CreateSpike(Transform parent, string name, float z, float startX, float endX, float phase)
@@ -240,28 +291,35 @@ public static class BuildLevel3PulseboundFoundry
         SpikeSweepHazard hazard = root.AddComponent<SpikeSweepHazard>();
         SetFloat(hazard, "startX", startX);
         SetFloat(hazard, "endX", endX);
-        SetFloat(hazard, "travelDuration", 3f);
-        SetFloat(hazard, "endpointPause", 0.75f);
+        SetFloat(hazard, "travelDuration", 0.5f);
+        SetFloat(hazard, "endpointPause", 0.2f);
         SetFloat(hazard, "phaseOffset", phase);
         SetFloat(hazard, "approachDistance", 24f);
-        SetFloat(hazard, "killRadius", 0.65f);
+        SetFloat(hazard, "carriageRadius", 0.775f);
         SetFloat(hazard, "verticalHitRange", 0.8f);
-        SetInt(hazard, "maxRunnersPerLeg", 4);
         SetTransform(hazard, "carriageVisual", carriage.transform);
     }
 
     private static void CreateHammer(Transform parent, string name, float x, float z, float phase)
     {
-        GameObject root = new GameObject(name);
-        root.transform.SetParent(parent, false);
+        if (swingHammerPrefab == null) swingHammerPrefab = LoadSwingHammerPrefab();
+        GameObject root = (GameObject)PrefabUtility.InstantiatePrefab(swingHammerPrefab, parent);
+        root.name = name;
         root.transform.localPosition = new Vector3(x, 3.2f, z);
-        CreatePrimitive("Reach Marker", PrimitiveType.Cylinder, root.transform,
-            new Vector3(0f, -3.08f, 0f), new Vector3(4.2f, 0.025f, 1.1f), markerMaterial);
-        GameObject arm = CreatePrimitive("Hammer Arm", PrimitiveType.Cube, root.transform,
-            new Vector3(0f, -1.1f, 0f), new Vector3(4f, 0.25f, 0.25f), hammerMaterial);
-        GameObject head = CreatePrimitive("Hammer Head", PrimitiveType.Sphere, root.transform,
-            new Vector3(0f, -2.2f, 0f), new Vector3(0.9f, 0.9f, 0.9f), hammerMaterial);
-        SwingHammerHazard hazard = root.AddComponent<SwingHammerHazard>();
+        Transform marker = root.transform.Find("Reach Marker");
+        Transform arm = root.transform.Find("Hammer Arm");
+        Transform head = root.transform.Find("Hammer Head");
+        BoxCollider armHitVolume = arm != null ? arm.GetComponent<BoxCollider>() : null;
+        SwingHammerHazard hazard = root.GetComponent<SwingHammerHazard>();
+        if (marker == null || arm == null || head == null || armHitVolume == null || hazard == null)
+            throw new InvalidOperationException("Shared SwingHammer prefab contract is incomplete.");
+
+        Renderer markerRenderer = marker.GetComponent<Renderer>();
+        Renderer armRenderer = arm.GetComponent<Renderer>();
+        Renderer headRenderer = head.GetComponent<Renderer>();
+        if (markerRenderer != null) markerRenderer.sharedMaterial = markerMaterial;
+        if (armRenderer != null) armRenderer.sharedMaterial = hammerMaterial;
+        if (headRenderer != null) headRenderer.sharedMaterial = hammerMaterial;
         SetFloat(hazard, "oscillationDuration", 2.6f);
         SetFloat(hazard, "angleRange", 55f);
         SetFloat(hazard, "phaseOffset", phase);
@@ -269,11 +327,25 @@ public static class BuildLevel3PulseboundFoundry
         SetFloat(hazard, "armLength", 2f);
         SetFloat(hazard, "killRadius", 0.8f);
         SetFloat(hazard, "verticalHitRange", 1.25f);
-        SetInt(hazard, "maxHeadRunnersPerCycle", 8);
-        SetInt(hazard, "maxArmRunnersPerCycle", 3);
-        SetFloat(hazard, "armVerticalHitRange", 2.2f);
-        SetTransform(hazard, "armVisual", arm.transform);
-        SetTransform(hazard, "hammerHead", head.transform);
+        SetFloat(hazard, "armVerticalHitRange", 0.375f);
+        SetFloat(hazard, "runnerHeight", 1.6f);
+        SetTransform(hazard, "armVisual", arm);
+        SetTransform(hazard, "hammerHead", head);
+        SetSerialized(hazard, "armHitVolume", property => property.objectReferenceValue = armHitVolume);
+    }
+
+    private static GameObject LoadSwingHammerPrefab()
+    {
+        string guidPath = AssetDatabase.GUIDToAssetPath(SwingHammerPrefabGuid);
+        if (!string.Equals(guidPath, SwingHammerPrefabPath, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("SwingHammer GUID resolves to '" + guidPath + "', expected '" + SwingHammerPrefabPath + "'.");
+
+        GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(SwingHammerPrefabPath);
+        Transform arm = prefab != null ? prefab.transform.Find("Hammer Arm") : null;
+        BoxCollider hitVolume = arm != null ? arm.GetComponent<BoxCollider>() : null;
+        if (prefab == null || prefab.GetComponent<SwingHammerHazard>() == null || hitVolume == null || !hitVolume.isTrigger)
+            throw new InvalidOperationException("Shared SwingHammer prefab is missing its hazard or trigger handle contract.");
+        return prefab;
     }
 
     private static void CreateCannon(Transform parent, string name, float x, float z, float phase)
@@ -314,20 +386,26 @@ public static class BuildLevel3PulseboundFoundry
         return go;
     }
 
-    private static Material EnsureMaterial(string name, Color color)
+    private static Material EnsureMaterial(string name, Color color, bool allowAssetWrite)
     {
         string path = "Assets/Materials/" + name + ".mat";
         Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
         if (material == null)
         {
+            if (!allowAssetWrite)
+                throw new InvalidOperationException("Generated material is missing and save=false forbids creating '" + path + "'.");
             Shader shader = Shader.Find("Universal Render Pipeline/Lit");
             if (shader == null) shader = Shader.Find("Standard");
+            if (shader == null) throw new InvalidOperationException("No supported shader found for generated material '" + path + "'.");
             material = new Material(shader);
             AssetDatabase.CreateAsset(material, path);
         }
-        if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
-        if (material.HasProperty("_Color")) material.SetColor("_Color", color);
-        EditorUtility.SetDirty(material);
+        if (allowAssetWrite)
+        {
+            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
+            if (material.HasProperty("_Color")) material.SetColor("_Color", color);
+            EditorUtility.SetDirty(material);
+        }
         return material;
     }
 
@@ -370,12 +448,57 @@ public static class BuildLevel3PulseboundFoundry
         serialized.ApplyModifiedPropertiesWithoutUndo();
     }
 
-    private static void SetText(string path, string value)
+    private static void SetText(Scene scene, string path, string value)
     {
-        GameObject go = GameObject.Find(path);
+        GameObject go = FindInScene(scene, path);
         if (go == null) return;
         TMP_Text text = go.GetComponent<TMP_Text>();
         if (text != null) text.text = value;
+    }
+
+    private static GameObject FindInScene(Scene scene, string path)
+    {
+        if (!scene.IsValid() || string.IsNullOrEmpty(path)) return null;
+
+        string[] parts = path.Split('/');
+        GameObject[] roots = scene.GetRootGameObjects();
+        for (int i = 0; i < roots.Length; i++)
+        {
+            if (parts.Length == 1)
+            {
+                Transform named = FindDescendantByName(roots[i].transform, parts[0]);
+                if (named != null) return named.gameObject;
+                continue;
+            }
+
+            if (roots[i].name != parts[0]) continue;
+            Transform current = roots[i].transform;
+            for (int partIndex = 1; partIndex < parts.Length && current != null; partIndex++)
+                current = current.Find(parts[partIndex]);
+            if (current != null) return current.gameObject;
+        }
+        return null;
+    }
+
+    private static Transform FindDescendantByName(Transform root, string name)
+    {
+        if (root.name == name) return root;
+        for (int i = 0; i < root.childCount; i++)
+        {
+            Transform found = FindDescendantByName(root.GetChild(i), name);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static Transform FindFirstChild(GameObject root, params string[] paths)
+    {
+        for (int i = 0; i < paths.Length; i++)
+        {
+            Transform result = root.transform.Find(paths[i]);
+            if (result != null) return result;
+        }
+        return null;
     }
 
     private static void ClearChildren(Transform parent)

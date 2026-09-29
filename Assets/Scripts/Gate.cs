@@ -3,6 +3,7 @@ using UnityEngine;
 public class Gate : MonoBehaviour
 {
     public enum GateType { Add, Multiply }
+    private const float MinimumReadableGateLabelFontSize = 18f;
 
     [Header("Gate Settings")]
     [SerializeField] private GateType gateType = GateType.Add; // Add (+3) or Multiply (x5)
@@ -39,6 +40,20 @@ public class Gate : MonoBehaviour
             {
                 textComponent.text = "x" + value; // e.g. x5
             }
+
+            // For labels facing the runner on the -Z side, Y = 180 reverses
+            // local X. Flip X back so the characters read left-to-right.
+            Transform textTransform = textComponent.transform;
+            if (Vector3.Dot(textTransform.forward, Vector3.back) > 0.99f &&
+                Vector3.Dot(textTransform.right, Vector3.left) > 0.99f)
+            {
+                Vector3 textScale = textTransform.localScale;
+                textScale.x = -Mathf.Abs(textScale.x);
+                textTransform.localScale = textScale;
+            }
+
+            // Existing scene labels are authored at 3.2 with autosizing off.
+            textComponent.fontSize = Mathf.Max(textComponent.fontSize, MinimumReadableGateLabelFontSize);
         }
     }
 

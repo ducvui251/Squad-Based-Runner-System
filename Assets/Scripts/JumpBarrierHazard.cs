@@ -21,20 +21,30 @@ public class JumpBarrierHazard : Level4HazardBase
         if (!CanProcess() || crossingResolved) return;
 
         float crossingDepth = 0.45f + hitPadding;
-        if (Mathf.Abs(player.transform.position.z - transform.position.z) > crossingDepth)
-        {
-            return;
-        }
+        bool leadInCrossingBand =
+            Mathf.Abs(player.transform.position.z - transform.position.z) <= crossingDepth;
 
-        if (player.HasCleared(height, verticalClearanceMargin))
+        if (leadInCrossingBand && player.HasCleared(height, verticalClearanceMargin))
         {
             crossingResolved = true;
             return;
         }
 
         RemoveOverlappingRunners(transform.position.x, width, height + verticalClearanceMargin, hazardColor);
-    }
 
+        float farEdgeZ = transform.position.z + crossingDepth;
+        var runners = crowd.ActiveRunners;
+        for (int i = 0; i < runners.Count; i++)
+        {
+            GameObject runner = runners[i];
+            if (runner != null && runner.transform.position.z <= farEdgeZ)
+            {
+                return;
+            }
+        }
+
+        crossingResolved = true;
+    }
     protected override void OnValidate()
     {
         base.OnValidate();

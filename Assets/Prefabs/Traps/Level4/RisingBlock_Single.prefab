@@ -51,9 +51,9 @@ MonoBehaviour:
   width: 1.8
   raisedHeight: 1.05
   cycleDuration: 3.2
-  riseDuration: 0.45
+  riseDuration: 0.225
   raisedHold: 1.1
-  lowerDuration: 0.45
+  lowerDuration: 0.225
   phaseOffset: 0
   hazardColor: {r: 1, g: 0.42, b: 0.08, a: 1}
 --- !u!1 &6725247513396912717

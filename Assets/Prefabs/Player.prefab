@@ -75,8 +75,8 @@ Animator:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 788545112153788819}
   m_Enabled: 1
-  m_Avatar: {fileID: 9000000, guid: 7ad246bda6f2fc147b3e4e031fa35118, type: 3}
-  m_Controller: {fileID: 9100000, guid: 475a9a307e575b84e90b4d1dff6f28b3, type: 2}
+  m_Avatar: {fileID: 9000000, guid: d6e51de63426d464d99e5c196eea477f, type: 3}
+  m_Controller: {fileID: 9100000, guid: 3c5e07b572c5a4145af8c1eaa17f0244, type: 2}
   m_CullingMode: 0
   m_UpdateMode: 0
   m_ApplyRootMotion: 0
@@ -399,7 +399,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4272875347692468097}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.9423972, y: 0.3180621, z: 0.10336164, w: -0.0063574016}
+  m_LocalRotation: {x: 0.9423972, y: 0.31806213, z: 0.10336164, w: -0.006357402}
   m_LocalPosition: {x: 0.0019309008, y: 0.06094611, z: 0.100943826}
   m_LocalScale: {x: 0.9999994, y: 1, z: 0.9999997}
   m_ConstrainProportionsScale: 0
@@ -1016,7 +1016,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 2414018706165787460}
-  - component: {fileID: 770366697660993572}
   - component: {fileID: 3707943122406665598}
   - component: {fileID: 6915541970438342115}
   - component: {fileID: 2895982716117355914}
@@ -1044,33 +1043,6 @@ Transform:
   - {fileID: 2596166450998307099}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0.732, y: -4.828, z: 0.899}
---- !u!54 &770366697660993572
-Rigidbody:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8776037724083957964}
-  serializedVersion: 5
-  m_Mass: 1
-  m_LinearDamping: 0
-  m_AngularDamping: 0.05
-  m_CenterOfMass: {x: 0, y: 0, z: 0}
-  m_InertiaTensor: {x: 1, y: 1, z: 1}
-  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ImplicitCom: 1
-  m_ImplicitTensor: 1
-  m_UseGravity: 1
-  m_IsKinematic: 0
-  m_Interpolate: 0
-  m_Constraints: 80
-  m_CollisionDetection: 0
 --- !u!143 &3707943122406665598
 CharacterController:
   m_ObjectHideFlags: 0
@@ -1111,10 +1083,15 @@ MonoBehaviour:
   forwardSpeed: 6
   horizontalSpeed: 8
   dragSensitivity: 0.05
+  startForwardSpeed: 6
+  maxForwardSpeed: 6
+  speedRampStartZ: 0
+  speedRampEndZ: 999
   jumpForce: 8
   gravity: -20
   coyoteTime: 0.15
   jumpBufferTime: 0.1
+  jumpReleaseVelocityMultiplier: 0.35
 --- !u!95 &2895982716117355914
 Animator:
   serializedVersion: 7
@@ -1152,6 +1129,16 @@ MonoBehaviour:
   runnerPrefab: {fileID: 788545112153788819}
   spacingFactor: 0.35
   lerpSpeed: 7
+  poolSize: 200
+  useCrowdTintOverride: 0
+  crowdTintOverrideColor: {r: 0.34, g: 0.62, b: 0.95, a: 1}
+  oneToOneLimit: 60
+  compressionEndLogicalCount: 200
+  maxVisualClones: 100
+  maxCompressionSpacingMultiplier: 0.7
+  jumpWaveMaxDelay: 0.22
+  jumpWaveBlend: 1
+  sfxPlayer: {fileID: 0}
 --- !u!1 &8841976472715523648
 GameObject:
   m_ObjectHideFlags: 0

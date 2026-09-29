@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 43c1a64f2fc7da1459daaae39b9d8b29, type: 3}
+  m_Name: SfxLibrary
+  m_EditorClassIdentifier: Assembly-CSharp::SfxLibrary
+  uiClick: {fileID: 8300000, guid: 6f7ba71f0fa9b406f9d6bb8415cbcc2b, type: 3}
+  coinPickup: {fileID: 8300000, guid: e8192ba9615ac05499a1cc97bcaddeba, type: 3}
+  crowdGrowth: {fileID: 8300000, guid: 44ca4357a080f7648b115f47d26984ed, type: 3}
+  crowdLoss: {fileID: 8300000, guid: de009badbe0650c44b1c1abbc4311599, type: 3}
+  gameOver: {fileID: 8300000, guid: 79dcf502a0c8d42ff946768eae13c51e, type: 3}
+  finish: {fileID: 8300000, guid: e539ecd2cbccc4be786a7c33890078ad, type: 3}
+  tankShot: {fileID: 8300000, guid: 74b222990d9952f49a1a56b5d1072183, type: 3}
+  uiClickGain: 0.35
+  coinPickupGain: 0.45
+  crowdGrowthGain: 0.45
+  crowdLossGain: 0.45
+  gameOverGain: 0.5
+  finishGain: 0.5
+  tankShotGain: 0.241

@@ -65,7 +65,14 @@ public class Enemy : MonoBehaviour
 
     private void Update()
     {
-        if (state == EnemyState.Dead) return;
+        if (state == EnemyState.Dead)
+        {
+            // Safety net: a dead enemy is skipped by every combat scan, so if a kill
+            // ever failed to destroy it, nothing would ever clean it up and it would
+            // remain a solid, visible obstacle. Enforce the invariant here instead.
+            if (gameObject.activeInHierarchy) Destroy(gameObject);
+            return;
+        }
 
         // Bỏ qua update nếu game chưa bắt đầu
         if (!UIManager.IsGameActive) return;
@@ -249,11 +256,39 @@ public class Enemy : MonoBehaviour
             }
         }
 
-        Vector3 midPoint = transform.position + Vector3.up * 0.5f; // offset slightly off ground
-        DeathPopEffect.Create(midPoint, playerColor);
-        DeathPopEffect.Create(midPoint, enemyColor);
+        // Stop colliding and rendering right now. Destroy() is deferred to the end of
+        // the frame, and everything below is presentation only, so a dead enemy must
+        // be made harmless here rather than relying on the destroy to land.
+        Collider[] colliders = GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            if (colliders[i] != null) colliders[i].enabled = false;
+        }
 
-        Destroy(gameObject);
+        Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] != null) renderers[i].enabled = false;
+        }
+
+        Vector3 midPoint = transform.position + Vector3.up * 0.5f; // offset slightly off ground
+
+        // The death pop is cosmetic. If it throws, the enemy must still be destroyed -
+        // otherwise it stays flagged Dead (so every combat scan skips it forever) while
+        // its collider and mesh keep shoving the player around.
+        try
+        {
+            DeathPopEffect.Create(midPoint, playerColor);
+            DeathPopEffect.Create(midPoint, enemyColor);
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning("Enemy: death effect failed for '" + name + "': " + exception.Message, this);
+        }
+        finally
+        {
+            Destroy(gameObject);
+        }
     }
 
     private void EngageCombat()

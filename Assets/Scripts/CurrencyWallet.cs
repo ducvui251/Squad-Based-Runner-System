@@ -2,6 +2,8 @@ using UnityEngine;
 
 public class CurrencyWallet : MonoBehaviour
 {
+    private const string WalletBalanceKey = "SpiralSquad.Wallet.Coins";
+
     public static CurrencyWallet Instance { get; private set; }
 
     [Header("Persistent Wallet Balance")]
@@ -25,6 +27,15 @@ public class CurrencyWallet : MonoBehaviour
         }
 
         Instance = this;
+        if (PlayerPrefs.HasKey(WalletBalanceKey))
+        {
+            walletCoins = Mathf.Max(0, PlayerPrefs.GetInt(WalletBalanceKey, walletCoins));
+        }
+        else
+        {
+            SaveWalletBalance();
+        }
+
         ResetRunCoins();
     }
 
@@ -51,6 +62,7 @@ public class CurrencyWallet : MonoBehaviour
 
         walletCoins += runCoins;
         runCoins = 0;
+        SaveWalletBalance();
     }
 
     public void AddWalletCoins(int amount)
@@ -58,6 +70,7 @@ public class CurrencyWallet : MonoBehaviour
         if (amount <= 0) return;
 
         walletCoins += amount;
+        SaveWalletBalance();
     }
 
     public bool SpendWalletCoins(int amount)
@@ -66,6 +79,14 @@ public class CurrencyWallet : MonoBehaviour
         if (walletCoins < amount) return false;
 
         walletCoins -= amount;
+        SaveWalletBalance();
         return true;
+    }
+
+    private void SaveWalletBalance()
+    {
+        walletCoins = Mathf.Max(0, walletCoins);
+        PlayerPrefs.SetInt(WalletBalanceKey, walletCoins);
+        PlayerPrefs.Save();
     }
 }

@@ -8,11 +8,12 @@ using UnityEngine.SceneManagement;
 
 public static class BuildLevel4VaultlineCitadel
 {
+    private const string PulsePlatePrefabPath = "Assets/Prefabs/Traps/Level3/PulsePlate.prefab";
+
     private static Material obstacleMaterial;
     private static Material telegraphMaterial;
     private static Material beamMaterial;
     private static Material cannonMaterial;
-    private static Material markerMaterial;
 
     [MenuItem("SpiralSquad/Build Level 4 - Vaultline Citadel")]
     public static void Main()
@@ -32,6 +33,7 @@ public static class BuildLevel4VaultlineCitadel
         ConfigureGates(root);
         ConfigureHudAndCamera(scene);
         BuildTrapSections(root);
+        LevelEnemyEncounterAuthoring.RebuildForLevel(root, 4);
 
         EditorSceneManager.MarkSceneDirty(scene);
         EditorSceneManager.SaveScene(scene);
@@ -46,7 +48,6 @@ public static class BuildLevel4VaultlineCitadel
         telegraphMaterial = EnsureMaterial("Level4_VaultlineTelegraph", new Color(0.10f, 0.95f, 0.82f));
         beamMaterial = EnsureMaterial("Level4_VaultlineBeam", new Color(1f, 0.38f, 0.08f));
         cannonMaterial = EnsureMaterial("Level4_VaultlineCannon", new Color(0.32f, 0.10f, 0.52f));
-        markerMaterial = EnsureMaterial("Level4_VaultlineMarker", new Color(0.30f, 0.85f, 1f));
     }
 
     private static void ConfigureCore(GameObject root)
@@ -60,6 +61,7 @@ public static class BuildLevel4VaultlineCitadel
         SetLocalPosition(root.transform.Find("Track/Start Line"), new Vector3(0f, 0.01f, 3f));
         SetLocalPosition(root.transform.Find("Track/Finish Marker"), new Vector3(0f, 0.02f, 355f));
         SetLocalPosition(root.transform.Find("FinishGate"), new Vector3(0f, 0f, 358f));
+        foreach (var finish in root.GetComponentsInChildren<FinishGate>(true)) CollisionAuditValidator.AuthorFinish(finish);
 
         GameObject player = FindInScene(root.scene, "Player");
         if (player != null)
@@ -68,10 +70,11 @@ public static class BuildLevel4VaultlineCitadel
             PlayerController controller = player.GetComponent<PlayerController>();
             if (controller != null)
             {
+                SetFloat(controller, "forwardSpeed", 6f);
                 SetFloat(controller, "startForwardSpeed", 6f);
-                SetFloat(controller, "maxForwardSpeed", 10f);
+                SetFloat(controller, "maxForwardSpeed", 21f);
                 SetFloat(controller, "speedRampStartZ", 3f);
-                SetFloat(controller, "speedRampEndZ", 358f);
+                SetFloat(controller, "speedRampEndZ", 179f);
                 SetFloat(controller, "jumpForce", 8f);
                 SetFloat(controller, "gravity", -20f);
             }
@@ -162,7 +165,7 @@ public static class BuildLevel4VaultlineCitadel
         CreateCannon(cross, "Cross Side Cannon", -4.35f, 282f, 1.5f);
         CreateShutter(cross, "Cross Shutter L", -1.2f, 290f, 1.2f);
         CreateShutter(cross, "Cross Shutter R", 1.2f, 290f, 1.2f);
-        CreateMarker(cross, "Cross Recovery Marker", 0f, 296f);
+        CreatePulseTrap(cross, "Cross Pulse Trap", 0f, 296f);
 
         Transform citadelLock = CreateSection(sections, "Citadel Lock");
         CreateBarrier(citadelLock, "Lock Barrier L", -2.4f, 304f, 1.8f, 0.95f, false);
@@ -173,7 +176,7 @@ public static class BuildLevel4VaultlineCitadel
         CreateCannon(citadelLock, "Lock Cannon R", 4.35f, 328f, 1.25f);
         CreateShutter(citadelLock, "Lock Shutter L", -2.4f, 336f, 2.25f);
         CreateShutter(citadelLock, "Lock Shutter R", 2.4f, 336f, 2.25f);
-        CreateMarker(citadelLock, "Lock Recovery Runway", 0f, 344f);
+        CreatePulseTrap(citadelLock, "Lock Pulse Trap", 0f, 344f);
     }
 
     private static Transform CreateSection(Transform parent, string name)
@@ -190,7 +193,6 @@ public static class BuildLevel4VaultlineCitadel
         SetFloat(instance.GetComponent<JumpBarrierHazard>(), "width", width);
         SetFloat(instance.GetComponent<JumpBarrierHazard>(), "height", height);
         SetFloat(instance.GetComponent<JumpBarrierHazard>(), "warningLead", 8f);
-        SetInt(instance.GetComponent<JumpBarrierHazard>(), "lossCap", 8);
     }
 
     private static void CreateRising(Transform parent, string name, float x, float z, float width, float cycle, float phase)
@@ -200,7 +202,6 @@ public static class BuildLevel4VaultlineCitadel
         SetFloat(instance.GetComponent<RisingBlockHazard>(), "cycleDuration", cycle);
         SetFloat(instance.GetComponent<RisingBlockHazard>(), "phaseOffset", phase);
         SetFloat(instance.GetComponent<RisingBlockHazard>(), "warningLead", 1f);
-        SetInt(instance.GetComponent<RisingBlockHazard>(), "lossCap", 6);
     }
 
     private static void CreateSweep(Transform parent, string name, float z, float startX, float endX, float phase)
@@ -211,7 +212,6 @@ public static class BuildLevel4VaultlineCitadel
         SetFloat(instance.GetComponent<SweepBeamHazard>(), "endX", endX);
         SetFloat(instance.GetComponent<SweepBeamHazard>(), "phaseOffset", phase);
         SetFloat(instance.GetComponent<SweepBeamHazard>(), "warningLead", 1f);
-        SetInt(instance.GetComponent<SweepBeamHazard>(), "lossCap", 5);
     }
 
     private static void CreateShutter(Transform parent, string name, float x, float z, float phase)
@@ -219,7 +219,6 @@ public static class BuildLevel4VaultlineCitadel
         GameObject instance = InstantiatePrefab("Assets/Prefabs/Traps/Level4/ShutterBlock_Single.prefab", parent, name, new Vector3(x, 0f, z));
         SetFloat(instance.GetComponent<ShutterBlockHazard>(), "phaseOffset", phase);
         SetFloat(instance.GetComponent<ShutterBlockHazard>(), "warningLead", 0.8f);
-        SetInt(instance.GetComponent<ShutterBlockHazard>(), "lossCap", 6);
     }
 
     private static void CreateCannon(Transform parent, string name, float x, float z, float phase)
@@ -237,9 +236,12 @@ public static class BuildLevel4VaultlineCitadel
         SetFloat(launcher, "initialFireDelay", phase);
     }
 
-    private static void CreateMarker(Transform parent, string name, float x, float z)
+    private static GameObject CreatePulseTrap(Transform parent, string name, float x, float z)
     {
-        CreatePrimitive(name, PrimitiveType.Cylinder, parent, new Vector3(x, 0.03f, z), new Vector3(2.4f, 0.02f, 2.4f), markerMaterial);
+        GameObject pulseTrap = InstantiatePrefab(PulsePlatePrefabPath, parent, name, new Vector3(x, 0f, z));
+        if (pulseTrap.GetComponent<PulsePlateHazard>() == null)
+            throw new InvalidOperationException("Pulse Plate prefab is missing PulsePlateHazard.");
+        return pulseTrap;
     }
 
     private static GameObject InstantiatePrefab(string path, Transform parent, string name, Vector3 localPosition)

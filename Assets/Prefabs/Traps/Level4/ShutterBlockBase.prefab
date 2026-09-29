@@ -50,8 +50,9 @@ MonoBehaviour:
   hitPadding: 0.25
   panelWidth: 1.8
   panelHeight: 1
-  openDuration: 1.1
-  closeDuration: 0.35
+  openDuration: 0.55
+  openHoldDuration: 0.55
+  closeDuration: 0.175
   raisedHold: 1.25
   phaseOffset: 0
   hazardColor: {r: 0.92, g: 0.18, b: 0.08, a: 1}

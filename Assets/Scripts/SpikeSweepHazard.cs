@@ -13,30 +13,31 @@ public class SpikeSweepHazard : MonoBehaviour
     [Header("Endpoints")]
     [SerializeField] private float startX = -3.8f;
     [SerializeField] private float endX = 3.8f;
-    [SerializeField, Min(0.1f)] private float travelDuration = 3f;
-    [SerializeField, Min(0f)] private float endpointPause = 0.75f;
+    [SerializeField, Min(0.1f)] private float travelDuration = 0.5f;
+    [SerializeField, Min(0f)] private float endpointPause = 0.2f;
     [SerializeField, Min(0f)] private float phaseOffset;
     [SerializeField, Min(0f)] private float approachDistance = 24f;
-    [Tooltip("Optional world-space Z after which this shuttle stops evaluating crowd hits.")]
-    [SerializeField] private float hitCheckEndZ = -1f;
+    [Tooltip("Optional distance forward from this shuttle after which crowd hit checks stop.")]
+    [SerializeField] private float hitCheckEndOffset = -1f;
+    [Tooltip("Legacy absolute cutoff retained for older serialized scenes.")]
+    [SerializeField, HideInInspector] private float hitCheckEndZ = -1f;
 
     [Header("Collision")]
-    [SerializeField, Min(0.05f)] private float killRadius = 0.65f;
+    [Tooltip("World-space radius of the visible carriage footprint around its center. Runner collision padding is added to this radius.")]
+    [SerializeField, Min(0.05f)] private float carriageRadius = 0.775f;
     [SerializeField, Range(0f, 0.75f)] private float runnerCollisionPadding = 0.25f;
     [SerializeField, Min(0.1f)] private float verticalHitRange = 0.8f;
-    [SerializeField, Min(1)] private int maxRunnersPerLeg = 4;
+#pragma warning disable CS0414 // Preserve old scene values without using them as damage limits.
+    [SerializeField, HideInInspector] private int maxRunnersPerLeg = 4;
+#pragma warning restore CS0414
 
     [Header("Presentation")]
     [SerializeField] private Transform carriageVisual;
 
     private PlayerCrowdManager cachedCrowdManager;
     private MotionPhase motionPhase = MotionPhase.Dormant;
-    private MotionPhase previousMotionPhase = MotionPhase.Dormant;
     private float cycleClock;
     private float cycleDuration;
-    private int legLosses;
-    private Renderer[] carriageRenderers;
-    private float cachedCollisionRadius;
 
     private void OnValidate()
     {
@@ -46,11 +47,11 @@ public class SpikeSweepHazard : MonoBehaviour
         travelDuration = Mathf.Max(0.1f, travelDuration);
         endpointPause = Mathf.Clamp(endpointPause, 0f, 3f);
         approachDistance = Mathf.Clamp(approachDistance, 1f, 50f);
+        hitCheckEndOffset = Mathf.Max(-1f, hitCheckEndOffset);
         hitCheckEndZ = Mathf.Max(-1f, hitCheckEndZ);
-        killRadius = Mathf.Clamp(killRadius, 0.05f, 1.5f);
+        carriageRadius = Mathf.Clamp(carriageRadius, 0.05f, 3f);
         runnerCollisionPadding = Mathf.Clamp(runnerCollisionPadding, 0f, 0.75f);
         verticalHitRange = Mathf.Clamp(verticalHitRange, 0.1f, 2f);
-        maxRunnersPerLeg = Mathf.Clamp(maxRunnersPerLeg, 1, 12);
     }
 
     private void Start()
@@ -59,10 +60,6 @@ public class SpikeSweepHazard : MonoBehaviour
         cycleDuration = endpointPause + travelDuration + endpointPause + travelDuration;
         cycleClock = 0f;
         SetCarriageX(startX);
-        carriageRenderers = carriageVisual != null
-            ? carriageVisual.GetComponentsInChildren<Renderer>(true)
-            : new Renderer[0];
-        cachedCollisionRadius = CalculateCollisionRadius();
     }
 
     private void Update()
@@ -75,10 +72,10 @@ public class SpikeSweepHazard : MonoBehaviour
             if (cachedCrowdManager == null) return;
         }
 
-        if (hitCheckEndZ > 0f && cachedCrowdManager.transform.position.z >= hitCheckEndZ)
-        {
-            return;
-        }
+        float hitCheckEnd = hitCheckEndOffset >= 0f
+            ? transform.position.z + hitCheckEndOffset
+            : hitCheckEndZ;
+        bool shouldCheckHits = hitCheckEnd <= 0f || cachedCrowdManager.transform.position.z < hitCheckEnd;
 
         if (motionPhase == MotionPhase.Dormant)
         {
@@ -87,8 +84,6 @@ public class SpikeSweepHazard : MonoBehaviour
 
             cycleClock = Mathf.Repeat(phaseOffset, cycleDuration);
             motionPhase = MotionPhase.AtStart;
-            previousMotionPhase = MotionPhase.Dormant;
-            legLosses = 0;
         }
 
         cycleClock += Time.deltaTime;
@@ -99,16 +94,8 @@ public class SpikeSweepHazard : MonoBehaviour
 
         Vector3 previousHitCenter = GetHitCenter();
         UpdateMotionPhase();
-        if (motionPhase != previousMotionPhase)
-        {
-            if (motionPhase == MotionPhase.MovingToEnd || motionPhase == MotionPhase.MovingToStart)
-            {
-                legLosses = 0;
-            }
-            previousMotionPhase = motionPhase;
-        }
 
-        if (motionPhase != MotionPhase.Dormant)
+        if (motionPhase != MotionPhase.Dormant && shouldCheckHits)
         {
             CheckRunnerCollisions(previousHitCenter, GetHitCenter());
         }
@@ -168,35 +155,13 @@ public class SpikeSweepHazard : MonoBehaviour
         return carriageVisual != null ? carriageVisual.position : transform.position;
     }
 
-    private float CalculateCollisionRadius()
-    {
-        float radius = killRadius;
-        if (carriageVisual == null || carriageRenderers == null) return radius + runnerCollisionPadding;
-
-        Vector3 carriagePosition = carriageVisual.position;
-        for (int i = 0; i < carriageRenderers.Length; i++)
-        {
-            Renderer renderer = carriageRenderers[i];
-            if (renderer == null || !renderer.enabled) continue;
-
-            Bounds bounds = renderer.bounds;
-            float xRadius = Mathf.Abs(bounds.center.x - carriagePosition.x) + bounds.extents.x;
-            float zRadius = Mathf.Abs(bounds.center.z - carriagePosition.z) + bounds.extents.z;
-            radius = Mathf.Max(radius, Mathf.Max(xRadius, zRadius));
-        }
-
-        return radius + runnerCollisionPadding;
-    }
-
     private void CheckRunnerCollisions(Vector3 previousHitCenter, Vector3 currentHitCenter)
     {
-        if (legLosses >= maxRunnersPerLeg) return;
-
         var runners = cachedCrowdManager.ActiveRunners;
-        float radius = cachedCollisionRadius > 0f ? cachedCollisionRadius : CalculateCollisionRadius();
+        float radius = Mathf.Max(0.05f, carriageRadius) + Mathf.Max(0f, runnerCollisionPadding);
         float radiusSqr = radius * radius;
 
-        for (int i = runners.Count - 1; i >= 0 && legLosses < maxRunnersPerLeg; i--)
+        for (int i = runners.Count - 1; i >= 0; i--)
         {
             if (i >= runners.Count || runners[i] == null) continue;
 
@@ -207,11 +172,10 @@ public class SpikeSweepHazard : MonoBehaviour
             bool insideHeight = Mathf.Abs(runnerPosition.y - currentHitCenter.y) <= verticalHitRange;
             if (!insideRadius || !insideHeight) continue;
 
-            bool removed = cachedCrowdManager.RemoveRunnerByHazard(
+            cachedCrowdManager.RemoveRunnerByHazard(
                 runner,
                 runner.transform.position + Vector3.up * 0.5f,
                 GetRunnerColor(runner));
-            if (removed) legLosses++;
         }
     }
 
@@ -254,7 +218,8 @@ public class SpikeSweepHazard : MonoBehaviour
         Gizmos.color = new Color(1f, 0.15f, 0.15f, 0.3f);
         Gizmos.DrawLine(new Vector3(startX, transform.position.y, transform.position.z),
             new Vector3(endX, transform.position.y, transform.position.z));
-        Gizmos.DrawWireSphere(new Vector3(startX, transform.position.y, transform.position.z), killRadius);
-        Gizmos.DrawWireSphere(new Vector3(endX, transform.position.y, transform.position.z), killRadius);
+        float radius = Mathf.Max(0.05f, carriageRadius) + Mathf.Max(0f, runnerCollisionPadding);
+        Gizmos.DrawWireSphere(new Vector3(startX, transform.position.y, transform.position.z), radius);
+        Gizmos.DrawWireSphere(new Vector3(endX, transform.position.y, transform.position.z), radius);
     }
 }

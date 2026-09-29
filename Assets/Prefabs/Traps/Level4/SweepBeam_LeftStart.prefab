@@ -136,13 +136,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SweepBeamHazard
   warningLead: 1
-  lossCap: 6
+  lossCap: 5
   hitPadding: 0.25
   startX: -3.6
   endX: 3.6
   beamHeight: 0.65
   beamWidth: 1.4
-  travelDuration: 2.8
-  endpointPause: 0.5
+  travelDuration: 1
+  endpointPause: 0.1
   phaseOffset: 0
   hazardColor: {r: 1, g: 0.12, b: 0.08, a: 1}

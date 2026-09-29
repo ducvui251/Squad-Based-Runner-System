@@ -1,11 +1,16 @@
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 [RequireComponent(typeof(BoxCollider))]
 public class FinishGate : MonoBehaviour
 {
+    [Header("Finish Collision")]
+    [Tooltip("Dedicated finite trigger volume used for completion. Leave empty only for legacy scenes; the root BoxCollider is then used as a compatibility fallback.")]
+    [SerializeField] private BoxCollider finishVolume;
+
     [Header("Finish UI")]
     [SerializeField] private Sprite panelSprite;
     [SerializeField] private Sprite bannerSprite;
@@ -15,49 +20,245 @@ public class FinishGate : MonoBehaviour
 
     private bool hasFinished;
     private GameObject overlay;
+    private GameObject transitionErrorOverlay;
     private PlayerCrowdManager crowd;
+    [SerializeField] private SfxPlayer sfxPlayer;
+    private BoxCollider resolvedFinishVolume;
+    private Vector3 previousCrowdPosition;
+    private bool hasPreviousCrowdPosition;
+    private bool wasEligibleForCrossing;
+
+    private const float GEOMETRY_EPSILON = 0.00001f;
 
     private void Awake()
     {
-        BoxCollider col = GetComponent<BoxCollider>();
-        if (col != null)
-        {
-            col.isTrigger = true;
-            Renderer renderer = GetComponent<Renderer>();
-            if (renderer != null)
-            {
-                Bounds world = renderer.bounds;
-                Vector3 scale = transform.lossyScale;
-                col.center = transform.InverseTransformPoint(world.center);
-                col.size = new Vector3(
-                    Mathf.Abs(world.size.x / scale.x),
-                    Mathf.Abs(world.size.y / scale.y),
-                    Mathf.Abs(world.size.z / scale.z));
-            }
-        }
+        // Finish volumes are authored in the scene. Runtime renderer fitting used to
+        // make the effective finish region depend on imported art bounds and could
+        // leave the trigger offset from the intended line. Keep the root collider as
+        // a compatibility fallback for legacy scenes that have not been migrated yet.
+        resolvedFinishVolume = finishVolume != null ? finishVolume : GetComponent<BoxCollider>();
     }
 
     private void Start()
     {
         crowd = FindFirstObjectByType<PlayerCrowdManager>();
+        if (crowd != null)
+        {
+            previousCrowdPosition = crowd.transform.position;
+            hasPreviousCrowdPosition = true;
+        }
     }
 
     private void Update()
     {
-        if (hasFinished || crowd == null)
+        if (hasFinished)
         {
             return;
         }
 
-        if (crowd.transform.position.z >= transform.position.z)
+        if (crowd == null)
+        {
+            crowd = FindFirstObjectByType<PlayerCrowdManager>();
+            if (crowd == null)
+            {
+                hasPreviousCrowdPosition = false;
+                wasEligibleForCrossing = false;
+                return;
+            }
+
+            previousCrowdPosition = crowd.transform.position;
+            hasPreviousCrowdPosition = true;
+            wasEligibleForCrossing = false;
+            return;
+        }
+
+        Vector3 currentCrowdPosition = crowd.transform.position;
+        if (!hasPreviousCrowdPosition)
+        {
+            previousCrowdPosition = currentCrowdPosition;
+            hasPreviousCrowdPosition = true;
+            return;
+        }
+
+        // Keep the history current while paused, inactive, empty, or terminal. This
+        // prevents a teleport/crossing that occurred outside an active run from being
+        // consumed when the run becomes active again.
+        if (!CanCompleteRun())
+        {
+            previousCrowdPosition = currentCrowdPosition;
+            hasPreviousCrowdPosition = true;
+            wasEligibleForCrossing = false;
+            return;
+        }
+
+        // The first sample after a paused, inactive, empty, or terminal interval is
+        // a new baseline. Without this edge, an inactive teleport into the finish
+        // volume could be consumed as a valid swept crossing on resume.
+        if (!wasEligibleForCrossing)
+        {
+            previousCrowdPosition = currentCrowdPosition;
+            hasPreviousCrowdPosition = true;
+            wasEligibleForCrossing = true;
+            return;
+        }
+
+        if (HasForwardCrossedFinish(previousCrowdPosition, currentCrowdPosition))
         {
             hasFinished = true;
             ShowFinish();
         }
+
+        previousCrowdPosition = currentCrowdPosition;
+        wasEligibleForCrossing = true;
+    }
+
+    private bool CanCompleteRun()
+    {
+        return crowd != null &&
+            crowd.isActiveAndEnabled &&
+            crowd.gameObject.activeInHierarchy &&
+            UIManager.IsGameActive &&
+            !crowd.IsGameOver &&
+            !crowd.IsLeadFallGameOver &&
+            crowd.ActiveRunnerCount > 0;
+    }
+
+    private bool HasForwardCrossedFinish(Vector3 fromWorld, Vector3 toWorld)
+    {
+        BoxCollider volume = resolvedFinishVolume;
+        if (!IsValidFinishVolume(volume))
+        {
+            return false;
+        }
+
+        Vector3 fromLocal = volume.transform.InverseTransformPoint(fromWorld);
+        Vector3 toLocal = volume.transform.InverseTransformPoint(toWorld);
+        if (!IsFinite(fromLocal) || !IsFinite(toLocal))
+        {
+            return false;
+        }
+
+        return IsFinishCrossing(
+            crowd != null && crowd.isActiveAndEnabled && crowd.gameObject.activeInHierarchy && UIManager.IsGameActive,
+            crowd != null && crowd.ActiveRunnerCount > 0,
+            crowd != null && crowd.IsGameOver,
+            crowd != null && crowd.IsLeadFallGameOver,
+            fromLocal,
+            toLocal,
+            volume.center,
+            volume.size);
+    }
+
+    private static bool IsValidFinishVolume(BoxCollider volume)
+    {
+        if (volume == null || !volume.enabled || !volume.isTrigger || !volume.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        Vector3 size = volume.size;
+        Vector3 lossyScale = volume.transform.lossyScale;
+        return IsFinite(volume.center) &&
+            IsFinite(size) &&
+            IsFinite(lossyScale) &&
+            size.x > GEOMETRY_EPSILON &&
+            size.y > GEOMETRY_EPSILON &&
+            size.z > GEOMETRY_EPSILON &&
+            Mathf.Abs(lossyScale.x) > GEOMETRY_EPSILON &&
+            Mathf.Abs(lossyScale.y) > GEOMETRY_EPSILON &&
+            Mathf.Abs(lossyScale.z) > GEOMETRY_EPSILON;
+    }
+
+    private static bool IsFinite(Vector3 value)
+    {
+        return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
+    }
+
+    private static bool IsFinite(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
+    }
+
+    /// <summary>
+    /// Tests an eligible forward movement segment against an authored finish box.
+    /// Endpoints must already be expressed in the volume's local space.
+    /// </summary>
+    public static bool IsFinishCrossing(
+        bool isRunActive,
+        bool hasAliveRunners,
+        bool isGameOver,
+        bool isLeadFallGameOver,
+        Vector3 fromLocal,
+        Vector3 toLocal,
+        Vector3 center,
+        Vector3 size)
+    {
+        if (!isRunActive || !hasAliveRunners || isGameOver || isLeadFallGameOver ||
+            !IsFinite(fromLocal) || !IsFinite(toLocal) || !IsFinite(center) || !IsFinite(size) ||
+            size.x <= GEOMETRY_EPSILON || size.y <= GEOMETRY_EPSILON || size.z <= GEOMETRY_EPSILON)
+        {
+            return false;
+        }
+
+        // The runner must travel through the volume in the gate's authored forward
+        // direction. A backward crossing should not complete the run.
+        if (toLocal.z <= fromLocal.z + GEOMETRY_EPSILON)
+        {
+            return false;
+        }
+
+        return SegmentIntersectsBox(fromLocal, toLocal, center, size * 0.5f);
+    }
+
+    // Segment-versus-AABB slab test in the finish volume's local space. Transforming
+    // both endpoints first keeps this exact for rotated and nonuniformly scaled boxes
+    // without allocating or relying on the collider's world-space AABB.
+    private static bool SegmentIntersectsBox(Vector3 start, Vector3 end, Vector3 center, Vector3 halfExtents)
+    {
+        Vector3 min = center - halfExtents;
+        Vector3 max = center + halfExtents;
+        Vector3 delta = end - start;
+        float entry = 0f;
+        float exit = 1f;
+
+        for (int axis = 0; axis < 3; axis++)
+        {
+            float origin = start[axis];
+            float direction = delta[axis];
+            if (Mathf.Abs(direction) <= GEOMETRY_EPSILON)
+            {
+                if (origin < min[axis] - GEOMETRY_EPSILON || origin > max[axis] + GEOMETRY_EPSILON)
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            float inverseDirection = 1f / direction;
+            float axisEntry = (min[axis] - origin) * inverseDirection;
+            float axisExit = (max[axis] - origin) * inverseDirection;
+            if (axisEntry > axisExit)
+            {
+                float swap = axisEntry;
+                axisEntry = axisExit;
+                axisExit = swap;
+            }
+
+            entry = Mathf.Max(entry, axisEntry);
+            exit = Mathf.Min(exit, axisExit);
+            if (entry > exit + GEOMETRY_EPSILON)
+            {
+                return false;
+            }
+        }
+
+        return entry <= 1f + GEOMETRY_EPSILON && exit >= -GEOMETRY_EPSILON;
     }
 
     private void ShowFinish()
     {
+        sfxPlayer?.PlayFinish();
         Time.timeScale = 0f;
         if (overlay != null)
         {
@@ -66,6 +267,10 @@ public class FinishGate : MonoBehaviour
 
         Canvas canvas = FindCanvas();
         overlay = BuildOverlay(canvas);
+        if (CurrencyWallet.Instance != null)
+        {
+            CurrencyWallet.Instance.BankRunCoins();
+        }
     }
 
     private Canvas FindCanvas()
@@ -145,24 +350,33 @@ public class FinishGate : MonoBehaviour
             TextAlignmentOptions.Center, FontStyles.Bold, "Reward Caption");
         SetRect(coinCaption.rectTransform, 125f, 49f, 170f, 24f, new Vector2(0.5f, 0.5f));
 
+        bool finalLevel = IsFinalLevel();
         Button next = CreateButton(card.transform, primaryButtonSprite, Color.white, "Next Level Button");
-        SetRect(next.GetComponent<RectTransform>(), 0f, -108f, 300f, 78f, new Vector2(0.5f, 0.5f));
-        next.onClick.AddListener(LoadNextLevel);
+        SetRect(next.GetComponent<RectTransform>(), 0f, finalLevel ? -92f : -108f, 300f, finalLevel ? 68f : 78f, new Vector2(0.5f, 0.5f));
+        next.onClick.AddListener(finalLevel ? ReplayCurrentLevel : LoadNextLevel);
 
-        TMP_Text nextLabel = CreateText(next.transform, "NEXT LEVEL", 25, Color.white,
+        TMP_Text nextLabel = CreateText(next.transform, finalLevel ? "REPLAY LEVEL 5" : "NEXT LEVEL", 25, Color.white,
             TextAlignmentOptions.Center, FontStyles.Bold, "Next Level Label");
         SetRect(nextLabel.rectTransform, 0f, 0f, 278f, 56f, new Vector2(0.5f, 0.5f));
 
-        TMP_Text nextLevel = CreateText(card.transform, "LEVEL " + GetNextLevelNumber(), 15,
+        TMP_Text nextLevel = CreateText(card.transform, finalLevel ? "ALL LEVELS COMPLETE" : "LEVEL " + GetNextLevelNumber(), 15,
             new Color(0.55f, 0.78f, 0.9f), TextAlignmentOptions.Center, FontStyles.Bold, "Next Level Number");
-        SetRect(nextLevel.rectTransform, 0f, -164f, 260f, 26f, new Vector2(0.5f, 0.5f));
+        SetRect(nextLevel.rectTransform, 0f, finalLevel ? -142f : -164f, 320f, 26f, new Vector2(0.5f, 0.5f));
+
+        Button menu = CreateButton(card.transform, primaryButtonSprite, Color.white, "Main Menu Button");
+        SetRect(menu.GetComponent<RectTransform>(), 0f, finalLevel ? -202f : -220f, 300f, finalLevel ? 58f : 46f, new Vector2(0.5f, 0.5f));
+        menu.onClick.AddListener(LoadMainMenu);
+
+        TMP_Text menuLabel = CreateText(menu.transform, "MAIN MENU", 22, Color.white,
+            TextAlignmentOptions.Center, FontStyles.Bold, "Main Menu Label");
+        SetRect(menuLabel.rectTransform, 0f, 0f, 278f, 46f, new Vector2(0.5f, 0.5f));
 
         return root;
     }
 
     private string GetLevelTitle()
     {
-        return "LEVEL " + GetCurrentLevelNumber() + " COMPLETE";
+        return IsFinalLevel() ? "YOU WON!" : "LEVEL " + GetCurrentLevelNumber() + " COMPLETE";
     }
 
     private static string GetLevelName()
@@ -211,22 +425,130 @@ public class FinishGate : MonoBehaviour
 
     private static int GetNextLevelNumber()
     {
-        int buildIndex = SceneManager.GetActiveScene().buildIndex;
-        return buildIndex >= 0 ? buildIndex + 2 : 2;
+        switch (SceneManager.GetActiveScene().name)
+        {
+            case "Level1": return 2;
+            case "Level2": return 3;
+            case "Level3": return 4;
+            case "Level4": return 5;
+            default: return 0;
+        }
     }
+
+    private static bool IsFinalLevel()
+    {
+        return SceneManager.GetActiveScene().name == "Level5";
+    }
+
+    private static bool TryGetNextLevel(string currentScene, out string nextScene)
+    {
+        switch (currentScene)
+        {
+            case "Level1": nextScene = "Level2"; return true;
+            case "Level2": nextScene = "Level3"; return true;
+            case "Level3": nextScene = "Level4"; return true;
+            case "Level4": nextScene = "Level5"; return true;
+            default:
+                nextScene = null;
+                return false;
+        }
+    }
+
+    private bool transitionInProgress;
 
     private void LoadNextLevel()
     {
+        if (transitionInProgress) return;
         Time.timeScale = 1f;
-        int buildIndex = SceneManager.GetActiveScene().buildIndex;
-        if (buildIndex >= 0 && buildIndex + 1 < SceneManager.sceneCountInBuildSettings)
+        if (!TryGetNextLevel(SceneManager.GetActiveScene().name, out string nextScene))
         {
-            SceneManager.LoadScene(buildIndex + 1);
+            ShowTransitionError("No next level is mapped for " + SceneManager.GetActiveScene().name + ".");
+            return;
         }
-        else
+
+        if (SceneUtility.GetBuildIndexByScenePath("Assets/Scenes/" + nextScene + ".unity") < 0)
         {
-            SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+            ShowTransitionError("The next level (" + nextScene + ") is not included in Build Settings.");
+            return;
         }
+
+        transitionInProgress = true;
+        SceneManager.LoadScene(nextScene);
+    }
+
+    private void ShowTransitionError(string message)
+    {
+        if (transitionErrorOverlay != null)
+        {
+            return;
+        }
+
+        Debug.LogError("FinishGate: " + message, this);
+        Canvas canvas = FindCanvas();
+        transitionErrorOverlay = new GameObject("Finish Transition Error", typeof(RectTransform), typeof(Image));
+        transitionErrorOverlay.transform.SetParent(canvas.transform, false);
+        RectTransform rootRect = transitionErrorOverlay.GetComponent<RectTransform>();
+        rootRect.anchorMin = Vector2.zero;
+        rootRect.anchorMax = Vector2.one;
+        rootRect.offsetMin = Vector2.zero;
+        rootRect.offsetMax = Vector2.zero;
+        Image blocker = transitionErrorOverlay.GetComponent<Image>();
+        blocker.color = Color.clear;
+        blocker.raycastTarget = true;
+
+        Image errorCard = CreateImage(transitionErrorOverlay.transform, panelSprite,
+            new Color(0.16f, 0.08f, 0.18f, 0.98f), true, "Transition Error Card");
+        SetRect(errorCard.rectTransform, 0f, 0f, 620f, 280f, new Vector2(0.5f, 0.5f));
+
+        TMP_Text title = CreateText(errorCard.transform, "LEVEL LOAD ERROR", 28f,
+            new Color(1f, 0.78f, 0.3f), TextAlignmentOptions.Center, FontStyles.Bold, "Transition Error Title");
+        SetRect(title.rectTransform, 0f, 82f, 560f, 48f, new Vector2(0.5f, 0.5f));
+
+        TMP_Text detail = CreateText(errorCard.transform, message, 17f, Color.white,
+            TextAlignmentOptions.Center, FontStyles.Normal, "Transition Error Message");
+        detail.textWrappingMode = TextWrappingModes.Normal;
+        SetRect(detail.rectTransform, 0f, 28f, 540f, 70f, new Vector2(0.5f, 0.5f));
+
+        Button retry = CreateButton(errorCard.transform, primaryButtonSprite, Color.white, "Transition Error Retry Button");
+        SetRect(retry.GetComponent<RectTransform>(), -132f, -82f, 230f, 52f, new Vector2(0.5f, 0.5f));
+        retry.onClick.AddListener(LoadNextLevel);
+        TMP_Text retryLabel = CreateText(retry.transform, "RETRY", 22f, Color.white,
+            TextAlignmentOptions.Center, FontStyles.Bold, "Transition Error Retry Label");
+        SetRect(retryLabel.rectTransform, 0f, 0f, 210f, 44f, new Vector2(0.5f, 0.5f));
+
+        Button menu = CreateButton(errorCard.transform, primaryButtonSprite, Color.white, "Transition Error Main Menu Button");
+        SetRect(menu.GetComponent<RectTransform>(), 132f, -82f, 230f, 52f, new Vector2(0.5f, 0.5f));
+        menu.onClick.AddListener(LoadMainMenu);
+        TMP_Text menuLabel = CreateText(menu.transform, "MAIN MENU", 22f, Color.white,
+            TextAlignmentOptions.Center, FontStyles.Bold, "Transition Error Main Menu Label");
+        SetRect(menuLabel.rectTransform, 0f, 0f, 210f, 44f, new Vector2(0.5f, 0.5f));
+
+        if (EventSystem.current != null)
+        {
+            EventSystem.current.SetSelectedGameObject(retry.gameObject);
+        }
+    }
+
+    private void ReplayCurrentLevel()
+    {
+        if (transitionInProgress) return;
+        Time.timeScale = 1f;
+        transitionInProgress = true;
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+
+    private void LoadMainMenu()
+    {
+        if (transitionInProgress) return;
+        if (SceneUtility.GetBuildIndexByScenePath("Assets/Scenes/Menu.unity") < 0)
+        {
+            Debug.LogError("FinishGate: Menu is not available in Build Settings.", this);
+            return;
+        }
+
+        Time.timeScale = 1f;
+        transitionInProgress = true;
+        SceneManager.LoadScene("Menu");
     }
 
     private static Image CreateImage(Transform parent, Sprite sprite, Color color, bool sliced, string objectName)
@@ -245,7 +567,7 @@ public class FinishGate : MonoBehaviour
         return image;
     }
 
-    private static Button CreateButton(Transform parent, Sprite sprite, Color color, string objectName)
+    private Button CreateButton(Transform parent, Sprite sprite, Color color, string objectName)
     {
         GameObject go = new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(Button));
         go.transform.SetParent(parent, false);
@@ -256,6 +578,7 @@ public class FinishGate : MonoBehaviour
 
         Button button = go.GetComponent<Button>();
         button.targetGraphic = image;
+        sfxPlayer?.RegisterButton(button);
         ColorBlock colors = button.colors;
         colors.normalColor = Color.white;
         colors.highlightedColor = new Color(1f, 1f, 1f, 0.92f);
@@ -276,7 +599,7 @@ public class FinishGate : MonoBehaviour
         text.alignment = alignment;
         text.fontStyle = fontStyle;
         text.enableAutoSizing = false;
-        text.enableWordWrapping = false;
+        text.textWrappingMode = TextWrappingModes.NoWrap;
         text.overflowMode = TextOverflowModes.Ellipsis;
         text.raycastTarget = false;
         text.margin = new Vector4(4f, 0f, 4f, 0f);

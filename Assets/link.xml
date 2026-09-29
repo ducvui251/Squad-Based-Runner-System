@@ -1,0 +1,20 @@
+<linker>
+  <!--
+    WebGL/IL2CPP builds.
+
+    ObjectPool<T>.Get() is only ever instantiated for TrackingProjectile. The player
+    build reported "RuntimeError: null function" with a stack frame of
+    ObjectPool`1_Get_..._AC_gshared, i.e. the IL2CPP generic-shared implementation of
+    that method was not emitted into the build. Preserving the generic type definition
+    keeps every member of its instantiations, so the method pointer can never be null
+    at runtime.
+
+    This is belt-and-braces: the crash is also reachable when ProjectileLauncher.Start
+    aborts early and leaves projectilePool unassigned. If that path is the only cause,
+    this file can be deleted without reintroducing a fault.
+  -->
+  <assembly fullname="Assembly-CSharp">
+    <type fullname="ObjectPool`1" preserve="all" />
+    <type fullname="TrackingProjectile" preserve="all" />
+  </assembly>
+</linker>

@@ -4,8 +4,9 @@ public class ShutterBlockHazard : Level4HazardBase
 {
     [SerializeField, Min(0.5f)] private float panelWidth = 1.8f;
     [SerializeField, Min(0.1f)] private float panelHeight = 1f;
-    [SerializeField, Min(0.1f)] private float openDuration = 1.1f;
-    [SerializeField, Min(0.05f)] private float closeDuration = 0.35f;
+    [SerializeField, Min(0.1f)] private float openDuration = 0.55f;
+    [SerializeField, Min(0f)] private float openHoldDuration = 0.55f;
+    [SerializeField, Min(0.05f)] private float closeDuration = 0.175f;
     [SerializeField, Min(0.1f)] private float raisedHold = 1.25f;
     [SerializeField, Min(0f)] private float phaseOffset;
     [SerializeField] private Color hazardColor = new Color(0.92f, 0.18f, 0.08f);
@@ -27,15 +28,22 @@ public class ShutterBlockHazard : Level4HazardBase
         if (!CanProcess()) return;
 
         elapsed += Time.deltaTime;
-        float cycle = openDuration + closeDuration + raisedHold;
+        float openEnd = openDuration;
+        float openHoldEnd = openEnd + openHoldDuration;
+        float closeEnd = openHoldEnd + closeDuration;
+        float cycle = closeEnd + raisedHold;
         float t = Mathf.Repeat(elapsed, cycle);
-        if (t < openDuration)
+        if (t < openEnd)
+        {
+            openness = Mathf.InverseLerp(0f, openEnd, t);
+        }
+        else if (t < openHoldEnd)
         {
             openness = 1f;
         }
-        else if (t < openDuration + closeDuration)
+        else if (t < closeEnd)
         {
-            openness = 1f - Mathf.InverseLerp(openDuration, openDuration + closeDuration, t);
+            openness = 1f - Mathf.InverseLerp(openHoldEnd, closeEnd, t);
         }
         else
         {
@@ -55,6 +63,7 @@ public class ShutterBlockHazard : Level4HazardBase
         panelWidth = Mathf.Clamp(panelWidth, 0.5f, 3f);
         panelHeight = Mathf.Clamp(panelHeight, 0.1f, 1.25f);
         openDuration = Mathf.Clamp(openDuration, 0.1f, 4f);
+        openHoldDuration = Mathf.Clamp(openHoldDuration, 0f, 4f);
         closeDuration = Mathf.Clamp(closeDuration, 0.05f, 2f);
         raisedHold = Mathf.Clamp(raisedHold, 0.1f, 4f);
         phaseOffset = Mathf.Max(0f, phaseOffset);

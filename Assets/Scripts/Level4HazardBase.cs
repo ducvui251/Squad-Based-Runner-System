@@ -5,7 +5,7 @@ public abstract class Level4HazardBase : MonoBehaviour
 {
     [Header("Level 4 Hazard")]
     [SerializeField, Min(0f)] protected float warningLead = 1f;
-    [SerializeField, Min(0)] protected int lossCap = 6;
+    [SerializeField, HideInInspector] protected int lossCap = 6; // Legacy serialized value; overlap damage is unlimited.
     [SerializeField, Min(0f)] protected float hitPadding = 0.25f;
 
     protected PlayerController player;
@@ -99,7 +99,6 @@ public abstract class Level4HazardBase : MonoBehaviour
     protected virtual void OnValidate()
     {
         warningLead = Mathf.Clamp(warningLead, 0f, 30f);
-        lossCap = Mathf.Clamp(lossCap, 0, 35);
         hitPadding = Mathf.Clamp(hitPadding, 0f, 2f);
     }
 }

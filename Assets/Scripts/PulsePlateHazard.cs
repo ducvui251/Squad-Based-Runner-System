@@ -14,43 +14,39 @@ public class PulsePlateHazard : MonoBehaviour
     [SerializeField, Min(0f)] private float phaseOffset;
 
     [Header("Collision")]
-    [SerializeField, Min(0.05f)] private float killRadius = 1.05f;
-    [SerializeField, Min(1)] private int maxRunnersPerDischarge = 2;
+    [Tooltip("World-space radius of the rendered charge ring at phase scale 1.0. The runtime applies the 0.7x-2.5x charge multiplier.")]
+    [SerializeField, Min(0.05f)] private float chargeRingBaseRadius = 0.5f;
+    [Tooltip("World-space radius of the rendered discharge ring at phase scale 1.0. The runtime applies the 2.5x-0.7x discharge multiplier.")]
+    [SerializeField, Min(0.05f)] private float dischargeRingBaseRadius = 0.5f;
+#pragma warning disable CS0414 // Preserve old scene values without using them as damage limits.
+    [SerializeField, HideInInspector] private int maxRunnersPerDischarge = 2;
+#pragma warning restore CS0414
     [SerializeField] private float runnerHeight = 1.6f;
 
     [Header("Presentation")]
     [SerializeField] private Transform chargeRing;
     [SerializeField] private Transform dischargeRing;
 
+    private const float MIN_RING_SCALE = 0.7f;
+    private const float MAX_RING_SCALE = 2.5f;
+
     private PlayerCrowdManager cachedCrowdManager;
-    private Renderer[] chargeRenderers;
-    private Renderer[] dischargeRenderers;
     private float cycleClock;
-    private int chargeLosses;
-    private int dischargeLosses;
 
     private void OnValidate()
     {
         cycleDuration = Mathf.Max(cycleDuration, chargeDuration + dischargeDuration + 0.05f);
         chargeDuration = Mathf.Clamp(chargeDuration, 0.05f, cycleDuration - 0.05f);
         dischargeDuration = Mathf.Clamp(dischargeDuration, 0.05f, cycleDuration - chargeDuration);
-        killRadius = Mathf.Clamp(killRadius, 0.05f, 2f);
-        maxRunnersPerDischarge = Mathf.Clamp(maxRunnersPerDischarge, 1, 8);
+        chargeRingBaseRadius = Mathf.Clamp(chargeRingBaseRadius, 0.05f, 4f);
+        dischargeRingBaseRadius = Mathf.Clamp(dischargeRingBaseRadius, 0.05f, 4f);
         runnerHeight = Mathf.Clamp(runnerHeight, 0.25f, 3f);
     }
 
     private void Start()
     {
         cachedCrowdManager = FindFirstObjectByType<PlayerCrowdManager>();
-        chargeRenderers = chargeRing != null
-            ? chargeRing.GetComponentsInChildren<Renderer>(true)
-            : new Renderer[0];
-        dischargeRenderers = dischargeRing != null
-            ? dischargeRing.GetComponentsInChildren<Renderer>(true)
-            : new Renderer[0];
         cycleClock = Mathf.Repeat(phaseOffset, cycleDuration);
-        chargeLosses = 0;
-        dischargeLosses = 0;
         UpdatePresentation();
     }
 
@@ -64,19 +60,10 @@ public class PulsePlateHazard : MonoBehaviour
             if (cachedCrowdManager == null) return;
         }
 
-        float previousClock = cycleClock;
         cycleClock += Time.deltaTime;
         if (cycleClock >= cycleDuration)
         {
             cycleClock = Mathf.Repeat(cycleClock, cycleDuration);
-            chargeLosses = 0;
-            dischargeLosses = 0;
-        }
-
-        if (previousClock > cycleClock)
-        {
-            chargeLosses = 0;
-            dischargeLosses = 0;
         }
 
         bool inCharge = cycleClock < chargeDuration;
@@ -85,28 +72,24 @@ public class PulsePlateHazard : MonoBehaviour
 
         UpdatePresentation();
 
-        if (inCharge && chargeLosses < maxRunnersPerDischarge)
+        if (inCharge)
         {
-            CheckRunnerCollisions(chargeRing, chargeRenderers, true);
+            CheckRunnerCollisions(true);
         }
 
-        if (inDischarge && dischargeLosses < maxRunnersPerDischarge)
+        if (inDischarge)
         {
-            CheckRunnerCollisions(dischargeRing, dischargeRenderers, false);
+            CheckRunnerCollisions(false);
         }
     }
 
-    private void CheckRunnerCollisions(Transform activeRing, Renderer[] activeRenderers, bool isChargePhase)
+    private void CheckRunnerCollisions(bool isChargePhase)
     {
         var runners = cachedCrowdManager.ActiveRunners;
-        int losses = 0;
-        float radius = GetCurrentRingRadius(activeRing, activeRenderers);
+        float radius = GetCurrentRingRadius(isChargePhase);
         float radiusSqr = radius * radius;
 
-        for (int i = runners.Count - 1;
-             i >= 0 && losses < maxRunnersPerDischarge &&
-             (isChargePhase ? chargeLosses : dischargeLosses) < maxRunnersPerDischarge;
-             i--)
+        for (int i = runners.Count - 1; i >= 0; i--)
         {
             if (i >= runners.Count || runners[i] == null) continue;
 
@@ -116,38 +99,23 @@ public class PulsePlateHazard : MonoBehaviour
             bool insideHeight = Mathf.Abs(delta.y) <= runnerHeight;
             if (!insideRadius || !insideHeight) continue;
 
-            bool removed = cachedCrowdManager.RemoveRunnerByHazard(
+            cachedCrowdManager.RemoveRunnerByHazard(
                 runner,
                 runner.transform.position + Vector3.up * 0.5f,
                 GetRunnerColor(runner));
-            if (removed)
-            {
-                losses++;
-                if (isChargePhase) chargeLosses++;
-                else dischargeLosses++;
-            }
         }
     }
 
-    private float GetCurrentRingRadius(Transform activeRing, Renderer[] activeRenderers)
+    private float GetCurrentRingRadius(bool isChargePhase)
     {
-        if (activeRing == null || activeRenderers == null || activeRenderers.Length == 0)
-            return killRadius;
-
-        float radius = 0f;
-        Vector3 plateCenter = transform.position;
-        for (int i = 0; i < activeRenderers.Length; i++)
+        if (isChargePhase)
         {
-            Renderer renderer = activeRenderers[i];
-            if (renderer == null) continue;
-
-            Bounds bounds = renderer.bounds;
-            float xRadius = Mathf.Abs(bounds.center.x - plateCenter.x) + bounds.extents.x;
-            float zRadius = Mathf.Abs(bounds.center.z - plateCenter.z) + bounds.extents.z;
-            radius = Mathf.Max(radius, Mathf.Max(xRadius, zRadius));
+            float charge01 = Mathf.Clamp01(cycleClock / chargeDuration);
+            return chargeRingBaseRadius * Mathf.Lerp(MIN_RING_SCALE, MAX_RING_SCALE, charge01);
         }
 
-        return radius > 0f ? radius : killRadius;
+        float discharge01 = Mathf.Clamp01((cycleClock - chargeDuration) / dischargeDuration);
+        return dischargeRingBaseRadius * Mathf.Lerp(MAX_RING_SCALE, MIN_RING_SCALE, discharge01);
     }
 
     private void UpdatePresentation()
@@ -162,7 +130,7 @@ public class PulsePlateHazard : MonoBehaviour
             if (charging)
             {
                 float charge01 = Mathf.Clamp01(cycleClock / chargeDuration);
-                chargeRing.localScale = Vector3.one * Mathf.Lerp(0.7f, 2.5f, charge01);
+                chargeRing.localScale = Vector3.one * Mathf.Lerp(MIN_RING_SCALE, MAX_RING_SCALE, charge01);
             }
         }
 
@@ -171,8 +139,8 @@ public class PulsePlateHazard : MonoBehaviour
             dischargeRing.gameObject.SetActive(discharging);
             if (discharging)
             {
-                float discharge01 = (cycleClock - chargeDuration) / dischargeDuration;
-                dischargeRing.localScale = Vector3.one * Mathf.Lerp(2.5f, 0.7f, discharge01);
+                float discharge01 = Mathf.Clamp01((cycleClock - chargeDuration) / dischargeDuration);
+                dischargeRing.localScale = Vector3.one * Mathf.Lerp(MAX_RING_SCALE, MIN_RING_SCALE, discharge01);
             }
         }
     }
@@ -192,6 +160,7 @@ public class PulsePlateHazard : MonoBehaviour
     private void OnDrawGizmosSelected()
     {
         Gizmos.color = new Color(0.2f, 0.9f, 1f, 0.3f);
-        Gizmos.DrawWireSphere(transform.position, killRadius);
+        float maximumRadius = Mathf.Max(chargeRingBaseRadius, dischargeRingBaseRadius) * MAX_RING_SCALE;
+        Gizmos.DrawWireSphere(transform.position, maximumRadius);
     }
 }
